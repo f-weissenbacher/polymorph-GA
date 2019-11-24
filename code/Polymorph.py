@@ -6,6 +6,12 @@ polymorph with other instances of the Polymorph class (for gene crossing, inheri
 Also provides functions that evaluate different properties (dipole moment, total energy etc.) of the polymorph (based
 on QM-calculations)
 
+Units
+-----
+
+Energy : Hartree
+Dipole moment : Debye
+
 """
 
 import itertools
@@ -14,9 +20,13 @@ import chemcoord as cc
 from collections import Iterable, Collection
 import numpy as np
 
+import ase
+from ase import data
+import imolecule
+#from ase.visualize import view
+
 from Mutators import FullRangeMutator
 
-import ase
 import pyscf
 
 # keys for property dictionaries
@@ -24,6 +34,26 @@ TOTAL_ENERGY = "total_energy"
 DIPOLE_MOMENT = "dipole_moment"
 IONIZATION_ENERGY = "ionization_energy"
 
+
+def checkAtomDistances(zmatrix):
+    structure = zmatrix.getCartesian()
+    n_atoms = len(zmatrix)
+    
+    for ind_a in range(n_atoms):
+        element_a = structure.loc[[ind_a], 'atom'].to_string(index=False).strip()
+        position_a = structure.loc[[ind_a], ('x', 'y', 'z')].to_numpy().flatten()
+        radius_a = ase.data.covalent_radii[ase.data.atomic_numbers[element_a]]
+        for ind_b in range(ind_a + 1, n_atoms):
+            element_b = structure.loc[[ind_b], 'atom'].to_string(index=False).strip()
+            position_b = structure.loc[[ind_b], ('x', 'y', 'z')].to_numpy().flatten()
+            radius_b = ase.data.covalent_radii[ase.data.atomic_numbers[element_b]]
+            
+            distance = np.linalg.norm(position_b - position_a)
+            if distance < radius_a + radius_b:
+                return False
+    
+    else:  # All distances are valid
+        return True
 
 class GeneticAlgorithm:
     def __init__(self):
@@ -56,7 +86,7 @@ class PolymorphFactory:
             raise FileNotFoundError("Unable to load base molecular structure. " + \
                                     f"File {base_structure_filepath} cannot be found.")
 
-        self.zmat_base = self.base_structure.to_zmat()
+        self.zmat_base = self.base_structure.get_zmat()
         # Defaults for mutation behavior
         self.default_mutation_rate = default_mutation_rate
         self.default_crossover_rate = default_crossover_rate
@@ -172,6 +202,7 @@ class PolymorphFactory:
 class Polymorph:
     # Function to generate new, unique IDs
     _generate_id = itertools.count().__next__
+    GENE_TYPES = ('bond', 'angle', 'dihedral')
 
     def __init__(self, zmatrix, bond_mutator, angle_mutator, dihedral_mutator,
                  mutable_bonds=None, mutable_angles=None, mutable_dihedrals=None,
@@ -186,6 +217,7 @@ class Polymorph:
         self.dihedral_mutator = dihedral_mutator
         self.crossover_probability = crossover_rate
         self.zmat = zmatrix
+        self.n_atoms = len(self.zmat.index)
         self._mutable_bonds = mutable_bonds
         self._mutable_angles = mutable_angles
         self._mutable_dihedrals = mutable_dihedrals
@@ -198,8 +230,12 @@ class Polymorph:
 
         if mutable_dihedrals is None:
             self._mutable_dihedrals = self.zmat.index[3:]
+            
+    def __str__(self):
+        text = f"Polymorph '{self.name}', ID: {self.id}"
+        return text
 
-
+    # Dynamic properties---------------------------------------------------------------------------------------------- #
     @property
     def genome(self):
         return {'bondlengths' : self.zmat.loc[self._mutable_bonds,'bond'],
@@ -207,8 +243,12 @@ class Polymorph:
                 'dihedrals' : self.zmat.loc[self._mutable_dihedrals,'dihedral']}
 
     @property
-    def bonds(self):
+    def bondpairs(self):
         return zip(self.zmat.index[1:], self.zmat.loc[1:,'b'])
+    
+    @property
+    def calculation_needed(self):
+        return self.properties == {}
 
     @property
     def structure(self):
@@ -218,13 +258,11 @@ class Polymorph:
     def zmat_string(self):
         return self.zmat.to_string(header=False, upper_triangle=False, index=False)
 
-    def __str__(self):
-        text = f"Polymorph '{self.name}', ID: {self.id}"
-        return text
-
     def saveStructure(self, filename):
         self.structure.to_xyz(filename)
 
+
+    # Mating and Crossover ------------------------------------------------------------------------------------------- #
     def mateWith(self, partner):
         """ Creates an offspring polymorph by mating two polymorphs
         Both involved polymorphs are assumed to share the same type of genome """
@@ -242,7 +280,7 @@ class Polymorph:
         for dihedral_index in self._mutable_dihedrals:
             if np.random.rand() < 0.5:
                 new_zmat.safe_loc[dihedral_index, 'dihedral'] = partner.zmat.loc[dihedral_index, 'dihedral']
-
+      
         return Polymorph(new_zmat, self.bond_mutator, self.angle_mutator, self.dihedral_mutator,
                          self._mutable_bonds, self._mutable_angles, self._mutable_dihedrals,
                          self.crossover_probability)
@@ -252,45 +290,107 @@ class Polymorph:
         """ Attempts gene crossovers with other polymorph 'partner' based on crossover probability. Changes
         are directly written to the zmatrices of both involved polymorphs"""
 
+        genomes_altered = False
+
         for bond_index in self._mutable_bonds:
             if np.random.rand() < self.crossover_probability:
+                genomes_altered = True
                 own_bondlength = self.zmat.loc[bond_index, 'bond']
                 self.zmat.safe_loc[bond_index, 'bond'] = partner.zmat.loc[bond_index, 'bond']
                 partner.zmat.safe_loc[bond_index, 'bond'] = own_bondlength
 
         for angle_index in self._mutable_angles:
-            if np.random.rand() < 0.5:
+            if np.random.rand() < self.crossover_probability:
+                genomes_altered = True
                 own_angle = self.zmat.loc[angle_index, 'angle']
                 self.zmat.safe_loc[angle_index, 'angle'] = partner.zmat.loc[angle_index, 'angle']
                 partner.zmat.safe_loc[angle_index, 'angle'] = own_angle
 
         for dihedral_index in self._mutable_dihedrals:
-            if np.random.rand() < 0.5:
+            if np.random.rand() < self.crossover_probability:
+                genomes_altered = True
                 own_dihedral = self.zmat.loc[dihedral_index, 'dihedral']
                 self.zmat.safe_loc[dihedral_index, 'dihedral'] = partner.zmat.loc[dihedral_index, 'dihedral']
                 partner.zmat.safe_loc[dihedral_index, 'dihedral'] = own_dihedral
+                
+        if genomes_altered:
+            self.resetProperties()
+            partner.resetProperties()
+          
+    # Mutations ------------------------------------------------------------------------------------------------------ #
+    def mutateBonds(self):
+        """
+        Attempts to mutate bond length of each mutable bond. If one or more bonds are altered, the calculated properties
+        of the polymorph are reset.
+        """
+        bondlengths_altered = self.bond_mutator.mutate(self.zmat, self._mutable_bonds)
+        if bondlengths_altered:
+            self.resetProperties()
+            
+    def mutateAngles(self):
+        angles_altered = self.angle_mutator.mutate(self.zmat, self._mutable_angles)
+        if angles_altered:
+            self.resetProperties()
+    
+    def mutateDihedrals(self):
+        dihedrals_altered = self.dihedral_mutator.mutate(self.zmat, self._mutable_dihedrals)
+        if dihedrals_altered:
+            self.resetProperties()
+            
+    def mutateGenome(self):
+        """ Attempts to mutate all mutable bond lengths, angles and dihedrals of the polymorph (in that order) """
+        self.mutateBonds()
+        self.mutateAngles()
+        self.mutateDihedrals()
+        
 
+        
+        
+    def resetProperties(self):
+        self.properties = dict()
 
-    def checkDistances(self):
-        structure = self.structure
-
-
+    # SCF Calculations ----------------------------------------------------------------------------------------------- #
+    def setupGeometryForCalculation(self, basis='sto-3g'):
+        zmat_str = self.zmat_string
+        mol = pyscf.gto.Mole()
+        mol.atom = zmat_str
+        mol.basis = 'sto-3g'
+        mol.charge = 0 # Neutral molecule
+        mol.spin = None # Guess multiplicity
+        mol.unit = 'Angstrom'
+        mol.verbose = 5 # set output level to 'info'
+        mol.max_memory = 1000
+        mol.build()
+        return mol
+    
     def runHartreeFock(self):
-        zmat_str = self.zmat_string
+        mol = self.setupGeometryForCalculation()
+        print("Starting restricted Hartree-Fock calculation ...")
+        calc = pyscf.scf.RHF(mol)
+       
+        if calc.converged:
+            energy = calc.e_tot
+            print(f"E(RHF) = {energy:g} Hartree")
+            dipole_moment = calc.dip_moment()
+        else:
+            energy = np.nan
+            dipole_moment = np.nan * np.ones(3)
+            print(f"Polymorph {self.id}: HF calculation did not converge!")
+        
+        self.properties[TOTAL_ENERGY] = energy
+        self.properties[DIPOLE_MOMENT] = dipole_moment
 
+#    def runSemiempiricalQM(self):
+#        mol = self.setupGeometryForCalculation()
 
-    def runSemiempiricalQM(self):
-        zmat_str = self.zmat_string
+    # Visualization -------------------------------------------------------------------------------------------------
+    
+    def visualize(self):
+        atoms = self.structure.get_as_ase()
+        ase.visualize.view(atoms)
+    
+    
 
-
-
-
-
-  
-  
-  
-  
-  
 
 if __name__ == "__main__":
   # Test polymorph class

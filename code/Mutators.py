@@ -1,8 +1,12 @@
 import numpy as np
+import ase
+from ase import data
+
+from Polymorph import Polymorph, checkAtomDistances
 
 class Mutator:
     """ Base class of molecular structure mutators"""
-    GENE_TYPES = ('bond','angle','dihedral')
+    GENE_TYPES = Polymorph.GENE_TYPES
 
     def __init__(self, target_gene: str, gene_value_range, gene_is_periodic=False, mutation_rate=0.001):
         if target_gene not in self.GENE_TYPES:
@@ -26,10 +30,13 @@ class Mutator:
                 valid_value = self.gene_value_range[1]
 
         return valid_value
-
-    # Abstract function definition, needs to implemented in daughter classes
-    def mutate(self, zmatrix, mutable_genes_indices):
-        pass
+    
+    def mutable_genes(self, polymorph):
+    
+   
+    # Abstract function definition, needs to implemented in child classes
+    def mutate(self, polymorph):
+        raise NotImplementedError("Mutator.mutate: This function is virtual and needs to be implemented in child classes")
 
 
 class IncrementalMutator(Mutator):
@@ -44,12 +51,31 @@ class IncrementalMutator(Mutator):
         self.mutation_range = mutation_range
         self.mutation_span = np.diff(mutation_range)[0]
 
-    def mutate(self, zmatrix, mutable_genes_indices):
-        for gene_index in mutable_genes_indices:
-            if self.mutation_probability < np.random.rand():
+    def mutate(self, polymorph):
+        """
+        :param Polymorph polymorph: The polymorph that shall be mutated
+        :param mutable_genes_indices: Indices of the polymorph's genes (bonds, angles or dihedrals) that can be altered
+        :return bool genes_altered: 'True' if one ore more of the targeted genes have been mutated, 'False' if not
+        """
+        genes_altered = False
+        new_zmatrix = polymorph.zmat.copy()
+        for gene_index in polymorph.:
+            if np.random.rand() < self.mutation_probability:
                 new_value = zmatrix.loc[gene_index, self.target_gene] + np.random.rand() * self.mutation_span
                 new_value = self.validateValue(new_value)
-                zmatrix.safe_loc[gene_index, self.target_gene] = new_value
+                new_zmatrix.safe_loc[gene_index, self.target_gene] = new_value
+                genes_altered = True
+                
+        if genes_altered:
+            update_valid = checkAtomDistances(new_zmatrix)
+            if update_valid:
+                zmatrix = new_zmatrix
+            
+                
+                
+                
+
+        
 
 
 class MultiplicativeMutator(Mutator):
@@ -66,12 +92,15 @@ class MultiplicativeMutator(Mutator):
         self.scaling_span = np.diff(mutation_scaling_range)
 
     def mutate(self, zmatrix, mutable_genes_indices):
+        genes_altered = False
         for gene_index in mutable_genes_indices:
-            if self.mutation_probability < np.random.rand():
+            if np.random.rand() < self.mutation_probability:
                 factor =  self.scaling_range[0] + np.random.rand() * self.scaling_span
                 new_value = self.validateValue(zmatrix.loc[gene_index, self.target_gene] * factor)
                 zmatrix.safe_loc[gene_index, self.target_gene] = new_value
+                genes_altered = True
 
+        return genes_altered
 
 class FullRangeMutator(Mutator):
     """
@@ -85,11 +114,15 @@ class FullRangeMutator(Mutator):
 
 
     def mutate(self, zmatrix, mutable_genes_indices):
+        old_zmatrix = zmatrix.copy()
+        genes_altered = False
         for gene_index in mutable_genes_indices:
-            if self.mutation_probability < np.random.rand():
+            if np.random.rand() < self.mutation_probability:
                 new_value = self.gene_value_range[0] + np.random.rand() * self.gene_value_span
                 zmatrix.safe_loc[gene_index, self.target_gene] = new_value
+                genes_altered = True
 
+        return genes_altered
 
 if __name__ == "__main__":
     m = Mutator('bond', (1.5,2.0), False)

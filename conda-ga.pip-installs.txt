@@ -1,0 +1,6 @@
+The following packages need to be installed to the conda-ga environment
+with pip (via 'pip install <package>') as installation via conda fails.
+
+chemcoord
+imolecule
+ase
