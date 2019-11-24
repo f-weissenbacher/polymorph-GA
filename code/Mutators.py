@@ -32,7 +32,7 @@ class Mutator:
         return valid_value
     
     def mutable_genes(self, polymorph):
-    
+        pass
    
     # Abstract function definition, needs to implemented in child classes
     def mutate(self, polymorph):
@@ -51,25 +51,26 @@ class IncrementalMutator(Mutator):
         self.mutation_range = mutation_range
         self.mutation_span = np.diff(mutation_range)[0]
 
-    def mutate(self, polymorph):
+    def mutate(self, polymorph, valid_updates_only=True):
         """
         :param Polymorph polymorph: The polymorph that shall be mutated
-        :param mutable_genes_indices: Indices of the polymorph's genes (bonds, angles or dihedrals) that can be altered
         :return bool genes_altered: 'True' if one ore more of the targeted genes have been mutated, 'False' if not
         """
         genes_altered = False
-        new_zmatrix = polymorph.zmat.copy()
-        for gene_index in polymorph.:
+        zmatrix = polymorph.zmat.copy()
+        for gene_index in polymorph.mutable_genes(self.target_gene):
             if np.random.rand() < self.mutation_probability:
                 new_value = zmatrix.loc[gene_index, self.target_gene] + np.random.rand() * self.mutation_span
                 new_value = self.validateValue(new_value)
-                new_zmatrix.safe_loc[gene_index, self.target_gene] = new_value
+                zmatrix.safe_loc[gene_index, self.target_gene] = new_value
                 genes_altered = True
                 
         if genes_altered:
-            update_valid = checkAtomDistances(new_zmatrix)
-            if update_valid:
-                zmatrix = new_zmatrix
+            update_valid = checkAtomDistances(zmatrix)
+            if update_valid or valid_updates_only is False:
+                polymorph.zmat = zmatrix
+                polymorph.resetProperties()
+
             
                 
                 

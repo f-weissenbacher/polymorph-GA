@@ -242,6 +242,7 @@ class Polymorph:
                 'angles' : self.zmat.loc[self._mutable_angles, 'angle'],
                 'dihedrals' : self.zmat.loc[self._mutable_dihedrals,'dihedral']}
 
+
     @property
     def bondpairs(self):
         return zip(self.zmat.index[1:], self.zmat.loc[1:,'b'])
@@ -318,6 +319,17 @@ class Polymorph:
             partner.resetProperties()
           
     # Mutations ------------------------------------------------------------------------------------------------------ #
+    def mutable_genes(self, gene_type):
+        if gene_type == 'bond':
+            return self._mutable_bonds
+        elif gene_type == 'angle':
+            return self._mutable_angles
+        elif gene_type == 'dihedral':
+            return self._mutable_dihedrals
+        else:
+            raise ValueError("Unknown gene type. Valid options are: " + str(GENE_TYPES))
+
+
     def mutateBonds(self):
         """
         Attempts to mutate bond length of each mutable bond. If one or more bonds are altered, the calculated properties
