@@ -6,7 +6,7 @@ Created on Sun Aug 25 13:19:03 2019
 """
 
 
-from Mutators import FullRangeMutator
+#from Mutators import FullRangeMutator
 from Polymorph import PolymorphFactory, Polymorph
 
 factory = PolymorphFactory("CF3-CH3.xyz")

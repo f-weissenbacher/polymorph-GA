@@ -25,6 +25,7 @@ from ase import data
 import imolecule
 #from ase.visualize import view
 
+from Utilities import checkAtomDistances
 from Mutators import FullRangeMutator
 
 import pyscf
@@ -34,26 +35,7 @@ TOTAL_ENERGY = "total_energy"
 DIPOLE_MOMENT = "dipole_moment"
 IONIZATION_ENERGY = "ionization_energy"
 
-
-def checkAtomDistances(zmatrix):
-    structure = zmatrix.getCartesian()
-    n_atoms = len(zmatrix)
-    
-    for ind_a in range(n_atoms):
-        element_a = structure.loc[[ind_a], 'atom'].to_string(index=False).strip()
-        position_a = structure.loc[[ind_a], ('x', 'y', 'z')].to_numpy().flatten()
-        radius_a = ase.data.covalent_radii[ase.data.atomic_numbers[element_a]]
-        for ind_b in range(ind_a + 1, n_atoms):
-            element_b = structure.loc[[ind_b], 'atom'].to_string(index=False).strip()
-            position_b = structure.loc[[ind_b], ('x', 'y', 'z')].to_numpy().flatten()
-            radius_b = ase.data.covalent_radii[ase.data.atomic_numbers[element_b]]
-            
-            distance = np.linalg.norm(position_b - position_a)
-            if distance < radius_a + radius_b:
-                return False
-    
-    else:  # All distances are valid
-        return True
+GENE_TYPES = ('bond', 'angle', 'dihedral')
 
 class GeneticAlgorithm:
     def __init__(self):
@@ -178,31 +160,42 @@ class PolymorphFactory:
         self.dihedral_mutator = FullRangeMutator('dihedral', self.dihedral_value_range)
 
     # Generation of polymorphs -----------------------------------------------------
-    def generateRandomPolymorph(self):
-        zmat = self.zmat_base.copy()
+    def generateRandomPolymorph(self, valid_structure_only=True, n_max_tries=100):
+        structure_found = False
+        for k in range(n_max_tries):
+            zmat = self.zmat_base.copy()
+            
+            # Set bonds randomly
+            for bond_index in self._mutable_bonds_idxs:
+                new_length = self.bond_value_range[0] + np.random.rand() * np.diff(self.bond_value_range)[0]
+                zmat.safe_loc[bond_index, 'bond'] = new_length
+            # Set mutable angles randomly
+            for angle_index in self._mutable_angles_idxs:
+                new_angle = self.angle_value_range[0] + np.random.rand() * np.diff(self.angle_value_range)[0]
+                zmat.safe_loc[angle_index, 'angle'] = new_angle
+            # Set mutable dihedrals randomly
+            for dihedral_index in self._mutable_dihedrals_idxs:
+                new_dihedral = self.dihedral_value_range[0] + np.random.rand() * np.diff(self.dihedral_value_range)[0]
+                zmat.safe_loc[dihedral_index, 'dihedral'] = new_dihedral
+                
+            if valid_structure_only:
+                structure_found = checkAtomDistances(zmat)
+            else:
+                structure_found = True
+                
+            if structure_found:
+                return Polymorph(zmat, self.bond_mutator, self.angle_mutator, self.dihedral_mutator,
+                                 self._mutable_bonds_idxs, self._mutable_angles_idxs, self._mutable_dihedrals_idxs,
+                                 self.default_crossover_rate)
+        else:
+            return None
 
-        # Set bonds randomly
-        for bond_index in self._mutable_bonds_idxs:
-            new_length = self.bond_value_range[0] + np.random.rand() * np.diff(self.bond_value_range)[0]
-            zmat.safe_loc[bond_index, 'bond'] = new_length
-        # Set mutable angles randomly
-        for angle_index in self._mutable_angles_idxs:
-            new_angle = self.angle_value_range[0] + np.random.rand() * np.diff(self.angle_value_range)[0]
-            zmat.safe_loc[angle_index, 'angle'] = new_angle
-        # Set mutable dihedrals randomly
-        for dihedral_index in self._mutable_dihedrals_idxs:
-            new_dihedral = self.dihedral_value_range[0] + np.random.rand() * np.diff(self.dihedral_value_range)[0]
-            zmat.safe_loc[dihedral_index, 'dihedral'] = new_dihedral
 
-        return Polymorph(zmat, self.bond_mutator, self.angle_mutator, self.dihedral_mutator,
-                         self._mutable_bonds_idxs, self._mutable_angles_idxs, self._mutable_dihedrals_idxs,
-                         self.default_crossover_rate)
 
 
 class Polymorph:
     # Function to generate new, unique IDs
     _generate_id = itertools.count().__next__
-    GENE_TYPES = ('bond', 'angle', 'dihedral')
 
     def __init__(self, zmatrix, bond_mutator, angle_mutator, dihedral_mutator,
                  mutable_bonds=None, mutable_angles=None, mutable_dihedrals=None,
@@ -241,7 +234,6 @@ class Polymorph:
         return {'bondlengths' : self.zmat.loc[self._mutable_bonds,'bond'],
                 'angles' : self.zmat.loc[self._mutable_angles, 'angle'],
                 'dihedrals' : self.zmat.loc[self._mutable_dihedrals,'dihedral']}
-
 
     @property
     def bondpairs(self):
@@ -287,38 +279,53 @@ class Polymorph:
                          self.crossover_probability)
 
 
-    def crossoverGenesWith(self, partner):
+    def crossoverGenesWith(self, partner, validate_updates=False):
         """ Attempts gene crossovers with other polymorph 'partner' based on crossover probability. Changes
-        are directly written to the zmatrices of both involved polymorphs"""
+        are directly written to the zmatrices of both involved polymorphs """
 
         genomes_altered = False
+
+        own_zmatrix = self.zmat.copy()
+        partner_zmatrix = partner.zmat.copy()
 
         for bond_index in self._mutable_bonds:
             if np.random.rand() < self.crossover_probability:
                 genomes_altered = True
                 own_bondlength = self.zmat.loc[bond_index, 'bond']
-                self.zmat.safe_loc[bond_index, 'bond'] = partner.zmat.loc[bond_index, 'bond']
-                partner.zmat.safe_loc[bond_index, 'bond'] = own_bondlength
+                own_zmatrix.safe_loc[bond_index, 'bond'] = partner.zmat.loc[bond_index, 'bond']
+                partner_zmatrix.safe_loc[bond_index, 'bond'] = own_bondlength
 
         for angle_index in self._mutable_angles:
             if np.random.rand() < self.crossover_probability:
                 genomes_altered = True
                 own_angle = self.zmat.loc[angle_index, 'angle']
-                self.zmat.safe_loc[angle_index, 'angle'] = partner.zmat.loc[angle_index, 'angle']
-                partner.zmat.safe_loc[angle_index, 'angle'] = own_angle
+                own_zmatrix.safe_loc[angle_index, 'angle'] = partner.zmat.loc[angle_index, 'angle']
+                partner_zmatrix.safe_loc[angle_index, 'angle'] = own_angle
 
         for dihedral_index in self._mutable_dihedrals:
             if np.random.rand() < self.crossover_probability:
                 genomes_altered = True
                 own_dihedral = self.zmat.loc[dihedral_index, 'dihedral']
-                self.zmat.safe_loc[dihedral_index, 'dihedral'] = partner.zmat.loc[dihedral_index, 'dihedral']
-                partner.zmat.safe_loc[dihedral_index, 'dihedral'] = own_dihedral
+                own_zmatrix.safe_loc[dihedral_index, 'dihedral'] = partner.zmat.loc[dihedral_index, 'dihedral']
+                partner_zmatrix.safe_loc[dihedral_index, 'dihedral'] = own_dihedral
                 
         if genomes_altered:
-            self.resetProperties()
-            partner.resetProperties()
+            self.applyMutation(own_zmatrix, validate_updates)
+            partner.applyMutation(partner_zmatrix, validate_updates)
           
     # Mutations ------------------------------------------------------------------------------------------------------ #
+
+    def applyMutation(self, new_zmatrix, validate_first=True):
+        if validate_first:
+            update_is_valid = checkAtomDistances(new_zmatrix)
+        else:
+            update_is_valid = True
+            
+        if update_is_valid:
+            self.zmat = new_zmatrix
+            self.resetProperties()
+
+
     def mutable_genes(self, gene_type):
         if gene_type == 'bond':
             return self._mutable_bonds
@@ -335,29 +342,26 @@ class Polymorph:
         Attempts to mutate bond length of each mutable bond. If one or more bonds are altered, the calculated properties
         of the polymorph are reset.
         """
-        bondlengths_altered = self.bond_mutator.mutate(self.zmat, self._mutable_bonds)
+        new_zmat, bondlengths_altered = self.bond_mutator.mutate(self.zmat, self._mutable_bonds)
         if bondlengths_altered:
-            self.resetProperties()
+            self.applyMutation(new_zmat)
             
     def mutateAngles(self):
-        angles_altered = self.angle_mutator.mutate(self.zmat, self._mutable_angles)
+        new_zmat, angles_altered = self.angle_mutator.mutate(self.zmat, self._mutable_angles)
         if angles_altered:
-            self.resetProperties()
+            self.applyMutation(new_zmat)
     
     def mutateDihedrals(self):
-        dihedrals_altered = self.dihedral_mutator.mutate(self.zmat, self._mutable_dihedrals)
+        new_zmat, dihedrals_altered = self.dihedral_mutator.mutate(self.zmat, self._mutable_dihedrals)
         if dihedrals_altered:
-            self.resetProperties()
+            self.applyMutation(new_zmat)
             
     def mutateGenome(self):
         """ Attempts to mutate all mutable bond lengths, angles and dihedrals of the polymorph (in that order) """
         self.mutateBonds()
         self.mutateAngles()
         self.mutateDihedrals()
-        
 
-        
-        
     def resetProperties(self):
         self.properties = dict()
 
