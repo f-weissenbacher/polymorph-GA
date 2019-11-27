@@ -22,6 +22,7 @@ import numpy as np
 
 import ase
 from ase import data
+from ase import visualize
 import imolecule
 #from ase.visualize import view
 
@@ -160,34 +161,49 @@ class PolymorphFactory:
         self.dihedral_mutator = FullRangeMutator('dihedral', self.dihedral_value_range)
 
     # Generation of polymorphs -----------------------------------------------------
-    def generateRandomPolymorph(self, valid_structure_only=True, n_max_tries=100):
-        structure_found = False
-        for k in range(n_max_tries):
+    def generateRandomPolymorph(self, valid_structure_only=True, n_max_restarts=2):
+
+        for k in range(n_max_restarts):
             zmat = self.zmat_base.copy()
+            mutation_succeeded = False
             
             # Set bonds randomly
             for bond_index in self._mutable_bonds_idxs:
+                old_length = zmat.loc[bond_index, 'bond']
                 new_length = self.bond_value_range[0] + np.random.rand() * np.diff(self.bond_value_range)[0]
                 zmat.safe_loc[bond_index, 'bond'] = new_length
+                if not valid_structure_only or checkAtomDistances(zmat):
+                    mutation_succeeded = True
+                else:
+                    zmat.safe_loc[bond_index, 'bond'] = old_length
+                
             # Set mutable angles randomly
             for angle_index in self._mutable_angles_idxs:
+                old_angle = zmat.loc[angle_index, 'angle']
                 new_angle = self.angle_value_range[0] + np.random.rand() * np.diff(self.angle_value_range)[0]
                 zmat.safe_loc[angle_index, 'angle'] = new_angle
+                if not valid_structure_only or checkAtomDistances(zmat):
+                    mutation_succeeded = True
+                else:
+                    zmat.safe_loc[angle_index, 'angle'] = old_angle
+                    
             # Set mutable dihedrals randomly
             for dihedral_index in self._mutable_dihedrals_idxs:
+                old_dihedral = zmat.loc[dihedral_index, 'dihedral']
                 new_dihedral = self.dihedral_value_range[0] + np.random.rand() * np.diff(self.dihedral_value_range)[0]
                 zmat.safe_loc[dihedral_index, 'dihedral'] = new_dihedral
+                if not valid_structure_only or checkAtomDistances(zmat):
+                    mutation_succeeded = True
+                else:
+                    zmat.safe_loc[dihedral_index, 'dihedral'] = old_dihedral
                 
-            if valid_structure_only:
-                structure_found = checkAtomDistances(zmat)
-            else:
-                structure_found = True
                 
-            if structure_found:
+            if mutation_succeeded:
                 return Polymorph(zmat, self.bond_mutator, self.angle_mutator, self.dihedral_mutator,
                                  self._mutable_bonds_idxs, self._mutable_angles_idxs, self._mutable_dihedrals_idxs,
                                  self.default_crossover_rate)
         else:
+            print(f"Warning: Unable to generate random Polymorph. Reached maximum number of restarts ({n_max_restarts})")
             return None
 
 
@@ -214,6 +230,8 @@ class Polymorph:
         self._mutable_bonds = mutable_bonds
         self._mutable_angles = mutable_angles
         self._mutable_dihedrals = mutable_dihedrals
+        self.charge = 0 # Electronic charge
+        self.multiplicity = 1 # Spin multiplicity
 
         if mutable_bonds is None:
             self._mutable_bonds = self.zmat.index[1:]
@@ -246,10 +264,18 @@ class Polymorph:
     @property
     def structure(self):
         return self.zmat.get_cartesian()
+    
+    @property
+    def gzmat_string(self):
+        gzmat_text = "# gzmat created from Polymorph\n"
+        gzmat_text += "\n" + f"Name: {self.name}, ID:{self.id}, Gen:{self.generation_number}\n" + "\n"
+        gzmat_text += f"{self.charge:d} {self.multiplicity:d}\n"
+        gzmat_text += self.zmat_string
+        return gzmat_text
 
     @property
     def zmat_string(self):
-        return self.zmat.to_string(header=False, upper_triangle=False, index=False)
+        return self.zmat.to_zmat(upper_triangle=False)
 
     def saveStructure(self, filename):
         self.structure.to_xyz(filename)
@@ -402,7 +428,7 @@ class Polymorph:
     # Visualization -------------------------------------------------------------------------------------------------
     
     def visualize(self):
-        atoms = self.structure.get_as_ase()
+        atoms = self.structure.get_ase_atoms()
         ase.visualize.view(atoms)
     
     
