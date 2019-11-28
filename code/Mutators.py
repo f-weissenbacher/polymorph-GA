@@ -125,6 +125,16 @@ class FullRangeMutator(Mutator):
         return new_zmatrix, genes_altered
             
 
+class PlaceboMutator(Mutator):
+    """ Mutator class that provides the same functions as all other mutators, but doesn't acutally mutate the polymorph"""
+    
+    def __init__(self, target_gene):
+        super().__init__(target_gene,[0,1], False, 0.0)
+        
+    def mutate(self, zmatrix: Zmat, mutable_genes_indices):
+        return zmatrix, False
+        
+
 if __name__ == "__main__":
     m = Mutator('bond', (1.5,2.0), False)
     mm = MultiplicativeMutator('bond', (0.2, 2.0), (0.75,1.25))
