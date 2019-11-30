@@ -35,8 +35,13 @@ import pyscf
 TOTAL_ENERGY = "total_energy"
 DIPOLE_MOMENT = "dipole_moment"
 IONIZATION_ENERGY = "ionization_energy"
+ELECTRON_AFFINITY = "electron_affinity"
 
 GENE_TYPES = ('bond', 'angle', 'dihedral')
+
+PROPERTY_FIELDS = (TOTAL_ENERGY, DIPOLE_MOMENT, 'mu_x', 'mu_y', 'mu_z')
+
+HARTREE_IN_EV = 27.211386245988
 
 class Polymorph:
     # Function to generate new, unique IDs
@@ -63,6 +68,7 @@ class Polymorph:
         self._mutable_bonds = mutable_bonds
         self._mutable_angles = mutable_angles
         self._mutable_dihedrals = mutable_dihedrals
+        self.data_fields = [TOTAL_ENERGY, DIPOLE_MOMENT]
         
         # SCF settings:
         self.scf_verbosity = 0 # 0: no output, 5: info level (good for debugging etc)
@@ -111,11 +117,15 @@ class Polymorph:
             return np.nan
         
     @property
-    def dipole_moment(self):
+    def dipole_moment_vec(self):
         if DIPOLE_MOMENT in self.properties.keys():
             return self.properties[DIPOLE_MOMENT]
         else:
-            return np.nan * np.ones(3)
+            return np.nan
+        
+    @property
+    def dipole_moment(self):
+            return np.linalg.norm(self.dipole_moment_vec)
     
     @property
     def gzmat_string(self):
@@ -134,15 +144,11 @@ class Polymorph:
         
     def needsEvaluation(self):
         return self.properties == {}
-    
-#    def asPandasSeries(self):
-#        data_dict = {'pm': self, TOTAL_ENERGY: self.total_energy,
-#                     'mu_x': self.dipole_moment[0], 'mu_y': self.dipole_moment[1], 'mu_z': self.dipole_moment[2]}
-#        return pd.Series(data_dict, name=self.id)
-    
+        
     def asDataDict(self):
-        data_dict = {'pm': self, TOTAL_ENERGY: self.total_energy,
-                     'mu_x': self.dipole_moment[0], 'mu_y': self.dipole_moment[1], 'mu_z': self.dipole_moment[2]}
+        dipole_vec = self.dipole_moment_vec
+        data_dict = {'pm': self, TOTAL_ENERGY: self.total_energy, DIPOLE_MOMENT: self.dipole_moment,
+                     'mu_x': dipole_vec[0], 'mu_y': dipole_vec[1], 'mu_z': dipole_vec[2]}
         return data_dict
 
     # Mating and Crossover ------------------------------------------------------------------------------------------- #
@@ -258,44 +264,110 @@ class Polymorph:
         self.properties = dict()
 
     # SCF Calculations ----------------------------------------------------------------------------------------------- #
-    def setupGeometryForCalculation(self, basis=None, verbosity=None):
+    def setupGeometryForCalculation(self, basis=None, charge=None, spin=None, verbosity=None):
         if basis is None:
             basis = self.scf_basis
         if verbosity is None:
             verbosity = self.scf_verbosity
+        if charge is None:
+            charge = self.charge
+        if spin is None:
+            spin = self.spin
             
         mol = pyscf.gto.Mole()
         mol.atom = self.zmat_string
         mol.basis = basis
-        mol.charge = self.charge
-        mol.spin = self.spin
+        mol.charge = charge
+        mol.spin = spin
         mol.unit = 'Angstrom'
         mol.verbose = verbosity
         mol.max_memory = 1000
         mol.build()
         return mol
     
-    def runHartreeFock(self, basis=None, verbosity=None):
-        mol = self.setupGeometryForCalculation(basis, verbosity)
+    def runHartreeFock(self, basis=None, charge=None, spin=None, verbosity=None):
+        mol = self.setupGeometryForCalculation(basis, charge, spin, verbosity)
         print("Starting restricted Hartree-Fock calculation ...")
         calc = pyscf.scf.RHF(mol)
         calc.kernel() # Needed to collect results of the calculation (I guess)
        
         if calc.converged:
-            energy = calc.e_tot
-            print(f"E(RHF) = {energy:g} Hartree")
+            energy = calc.e_tot * HARTREE_IN_EV
+            print(f"E(RHF) = {energy:g} eV")
             dipole_moment = calc.dip_moment()
         else:
             energy = np.nan
             dipole_moment = np.nan * np.ones(3)
-            print(f"Polymorph {self.id}: HF calculation did not converge!")
+            print(f"Polymorph {self.id}: Hartree-Fock calculation did not converge!")
         
         self.properties[TOTAL_ENERGY] = energy
         self.properties[DIPOLE_MOMENT] = dipole_moment
         self.last_calculation = calc
+        
+    def calculateElectronAffinity(self, anion_spin=None):
+        if anion_spin is None:
+            anion_spin = (self.spin + 1) % 2
+            
+        if self.needsEvaluation():
+            self.runHartreeFock()
+            
+        neutral_energy = self.total_energy
+        
+        if neutral_energy == np.nan:
+            print(f"Polymorph {self.id}: Energy of neutral molecule cannot be determined, " + \
+                  "no use in running calculation for anion.")
+            self.properties[ELECTRON_AFFINITY] = np.nan
+            return
+            
+        anion = self.setupGeometryForCalculation(charge=self.charge-1, spin=anion_spin)
+        print("Starting Hartree-Fock calculation for anion ...")
+        calc = pyscf.scf.RHF(anion)
+        calc.kernel()  # Needed to collect results of the calculation (I guess)
 
-#    def runSemiempiricalQM(self):
-#        mol = self.setupGeometryForCalculation()
+        if calc.converged:
+            anion_energy = calc.e_tot * HARTREE_IN_EV
+            print(f"Anion: E(ROHF) = {anion_energy:g} eV")
+            electron_affinity = neutral_energy - anion_energy # > 0
+            print(f"Electron affinity: {electron_affinity} eV")
+            self.properties[ELECTRON_AFFINITY] = electron_affinity
+            
+        else:
+            print(f"Polymorph {self.id}: Hartree-Fock calculation for anion did not converge!")
+            self.properties[ELECTRON_AFFINITY] = np.nan
+            return
+
+    def calculateIonizationEnergy(self, cation_spin=None):
+        if cation_spin is None:
+            cation_spin = (self.spin + 1) % 2
+    
+        if self.needsEvaluation():
+            self.runHartreeFock()
+    
+        neutral_energy = self.total_energy
+    
+        if neutral_energy == np.nan:
+            print(f"Polymorph {self.id}: Energy of neutral molecule cannot be determined, " + \
+                  "no use in running calculation for cation.")
+            self.properties[IONIZATION_ENERGY] = np.nan
+            return
+    
+        cation = self.setupGeometryForCalculation(charge=self.charge + 1, spin=cation_spin)
+        print("Starting Hartree-Fock calculation for cation ...")
+        calc = pyscf.scf.RHF(cation)
+        calc.kernel()  # Needed to collect results of the calculation (I guess)
+    
+        if calc.converged:
+            cation_energy = calc.e_tot * HARTREE_IN_EV
+            print(f"Cation: E(ROHF) = {cation_energy:g} eV")
+            ionization_energy = cation_energy - neutral_energy  # > 0
+            print(f"Ionization energy: {ionization_energy} eV")
+            self.properties[IONIZATION_ENERGY] = ionization_energy
+    
+        else:
+            print(f"Polymorph {self.id}: Hartree-Fock calculation for cation did not converge!")
+            self.properties[IONIZATION_ENERGY] = np.nan
+            return
+
 
     # Visualization -------------------------------------------------------------------------------------------------
     

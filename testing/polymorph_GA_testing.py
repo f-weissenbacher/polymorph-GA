@@ -9,24 +9,30 @@ import ase
 from Utilities import checkAtomDistances
 
 #from Mutators import FullRangeMutator
-from Polymorph import PolymorphFactory, Polymorph
+from Polymorph import Polymorph
+from PolymorphFactory import PolymorphFactory
 
-factory = PolymorphFactory("CF3-CH3.xyz")
+
+#factory = PolymorphFactory("CF3-CH3.xyz")
+factory = PolymorphFactory("2pyrCN.xyz")
 factory.freezeBonds('all')
 factory.setupDefaultMutators()
 
 polymorphs = list()
 
-print(factory.zmat_base)
-print("=" * 60)
+#print(factory.zmat_base)
+#print("=" * 60)
 
-structure_valid = checkAtomDistances(factory.zmat_base)
+pm = factory.base_polymorph
+#pm.scf_basis = '6311++g**'
+pm.scf_basis = 'sto-3g'
+#pm.scf_basis = '6-31G'
+#pm.scf_basis = '6-31G**'
+pm.scf_basis = 'sto-6g'
 
-for k in range(10):
-    p = factory.generateRandomPolymorph(n_max_restarts=1)
-    if p is not None:
-        print(p.zmat)
-        print("="*60)
-        p.visualize()
+pm.calculateElectronAffinity()
+pm.calculateIonizationEnergy()
+
+
 
 

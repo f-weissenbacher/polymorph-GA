@@ -14,9 +14,3 @@ print("="*60)
 print(zmat)
 zmat.get_cartesian().view(viewer='ase-gui')
 print("="*60)
-
-
-
-
-
-
