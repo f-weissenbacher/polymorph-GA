@@ -28,7 +28,7 @@ pm = factory.base_polymorph
 pm.scf_basis = 'sto-3g'
 #pm.scf_basis = '6-31G'
 #pm.scf_basis = '6-31G**'
-pm.scf_basis = 'sto-6g'
+#pm.scf_basis = 'sto-6g'
 
 pm.calculateElectronAffinity()
 pm.calculateIonizationEnergy()

@@ -17,7 +17,7 @@ Dipole moment : Debye
 import itertools
 import os
 import chemcoord as cc
-from collections import Iterable, Collection
+from collections import Iterable, Collection, defaultdict
 import numpy as np
 import pandas as pd
 import ase
@@ -31,21 +31,21 @@ from Mutators import FullRangeMutator
 
 import pyscf
 
-# keys for property dictionaries
-TOTAL_ENERGY = "total_energy"
-DIPOLE_MOMENT = "dipole_moment"
-IONIZATION_ENERGY = "ionization_energy"
-ELECTRON_AFFINITY = "electron_affinity"
-
-GENE_TYPES = ('bond', 'angle', 'dihedral')
-
-PROPERTY_FIELDS = (TOTAL_ENERGY, DIPOLE_MOMENT, 'mu_x', 'mu_y', 'mu_z')
-
 HARTREE_IN_EV = 27.211386245988
 
 class Polymorph:
     # Function to generate new, unique IDs
     _generate_id = itertools.count().__next__
+
+    # keys for property dictionaries
+    TOTAL_ENERGY = "total_energy"
+    DIPOLE_MOMENT = "dipole_moment"
+    DIPOLE_VEC_FIELDS = ('mu_x', 'mu_y', 'mu_z')
+    IONIZATION_ENERGY = "ionization_energy"
+    ELECTRON_AFFINITY = "electron_affinity"
+    DATA_FIELDS = (TOTAL_ENERGY, DIPOLE_MOMENT) + DIPOLE_VEC_FIELDS + (IONIZATION_ENERGY, ELECTRON_AFFINITY)
+    
+    GENE_TYPES = ('bond', 'angle', 'dihedral')
     
     @classmethod
     def resetIdCounter(cls):
@@ -58,7 +58,6 @@ class Polymorph:
         self.name = name
         self.id = Polymorph._generate_id()
         self.generation_number = generation_number
-        self.properties = dict()
         self.bond_mutator = bond_mutator
         self.angle_mutator = angle_mutator
         self.dihedral_mutator = dihedral_mutator
@@ -68,9 +67,12 @@ class Polymorph:
         self._mutable_bonds = mutable_bonds
         self._mutable_angles = mutable_angles
         self._mutable_dihedrals = mutable_dihedrals
-        self.data_fields = [TOTAL_ENERGY, DIPOLE_MOMENT]
         
-        # SCF settings:
+        self.data_fields = Polymorph.DATA_FIELDS
+        self.properties = defaultdict(lambda:np.nan).fromkeys(Polymorph.DATA_FIELDS)
+        self.needs_evaluation = True
+        
+        # Default SCF settings:
         self.scf_verbosity = 0 # 0: no output, 5: info level (good for debugging etc)
         self.scf_basis = 'sto-3g'
         self.charge = 0 # Electronic charge
@@ -102,30 +104,23 @@ class Polymorph:
         return zip(self.zmat.index[1:], self.zmat.loc[1:,'b'])
     
     @property
-    def calculation_needed(self):
-        return self.properties == {}
-
-    @property
     def structure(self):
         return self.zmat.get_cartesian()
     
     @property
     def total_energy(self):
-        if TOTAL_ENERGY in self.properties.keys():
-            return self.properties[TOTAL_ENERGY]
-        else:
-            return np.nan
+        return self.properties[Polymorph.TOTAL_ENERGY]
         
     @property
     def dipole_moment_vec(self):
-        if DIPOLE_MOMENT in self.properties.keys():
-            return self.properties[DIPOLE_MOMENT]
-        else:
-            return np.nan
+        dipole_vec = np.nan * np.ones(3)
+        for k, field in enumerate(Polymorph.DIPOLE_VEC_FIELDS):
+            dipole_vec[k] = self.properties[field]
+        return dipole_vec
         
     @property
     def dipole_moment(self):
-            return np.linalg.norm(self.dipole_moment_vec)
+        return self.properties[Polymorph.DIPOLE_MOMENT]
     
     @property
     def gzmat_string(self):
@@ -142,21 +137,21 @@ class Polymorph:
     def saveStructure(self, filename):
         self.structure.to_xyz(filename)
         
-    def needsEvaluation(self):
-        return self.properties == {}
+    def resetProperties(self):
+        self.properties.clear()
+        self.properties.fromkeys(Polymorph.DATA_FIELDS)
+        self.needs_evaluation = True
         
-    def asDataDict(self):
-        dipole_vec = self.dipole_moment_vec
-        data_dict = {'pm': self, TOTAL_ENERGY: self.total_energy, DIPOLE_MOMENT: self.dipole_moment,
-                     'mu_x': dipole_vec[0], 'mu_y': dipole_vec[1], 'mu_z': dipole_vec[2]}
-        return data_dict
 
     # Mating and Crossover ------------------------------------------------------------------------------------------- #
-    def mateWith(self, partner):
+    def mateWith(self, partner, verbose=False):
         """ Creates an offspring polymorph by mating two polymorphs
         Both involved polymorphs are assumed to share the same type of genome """
 
         new_zmat = self.zmat.copy()
+        
+        if verbose:
+            print(f"Mating polymorphs {self.id} and {partner.id}")
 
         for bond_index in self._mutable_bonds:
             if np.random.rand() < 0.5:
@@ -178,13 +173,16 @@ class Polymorph:
                          self.crossover_probability, name=name, generation_number=generation_number)
 
 
-    def crossoverGenesWith(self, partner, validate_updates=False):
+    def crossoverGenesWith(self, partner, validate_updates=False, verbose=False):
         """ Attempts gene crossovers with other polymorph 'partner' based on crossover probability. Changes
         are directly written to the zmatrices of both involved polymorphs """
 
         genomes_altered = False
         own_zmatrix = self.zmat.copy()
         partner_zmatrix = partner.zmat.copy()
+        
+        if verbose:
+            print(f"Attempting gene crossover between polymorphs {self.id} and {partner.id}")
 
         for bond_index in self._mutable_bonds:
             if np.random.rand() < self.crossover_probability:
@@ -232,8 +230,7 @@ class Polymorph:
         elif gene_type == 'dihedral':
             return self._mutable_dihedrals
         else:
-            raise ValueError("Unknown gene type. Valid options are: " + str(GENE_TYPES))
-
+            raise ValueError("Unknown gene type. Valid options are: " + str(Polymorph.GENE_TYPES))
 
     def mutateBonds(self):
         """
@@ -260,8 +257,6 @@ class Polymorph:
         self.mutateAngles()
         self.mutateDihedrals()
 
-    def resetProperties(self):
-        self.properties = dict()
 
     # SCF Calculations ----------------------------------------------------------------------------------------------- #
     def setupGeometryForCalculation(self, basis=None, charge=None, spin=None, verbosity=None):
@@ -295,20 +290,24 @@ class Polymorph:
             energy = calc.e_tot * HARTREE_IN_EV
             print(f"E(RHF) = {energy:g} eV")
             dipole_moment = calc.dip_moment()
+            
+            self.properties[Polymorph.TOTAL_ENERGY] = energy
+            self.properties[Polymorph.DIPOLE_MOMENT] = np.linalg.norm(dipole_moment)
+            for k in range(3):
+                self.properties[Polymorph.DIPOLE_VEC_FIELDS[k]] = dipole_moment[k]
+                
+            self.last_calculation = calc
+            self.needs_evaluation = False
         else:
-            energy = np.nan
-            dipole_moment = np.nan * np.ones(3)
             print(f"Polymorph {self.id}: Hartree-Fock calculation did not converge!")
         
-        self.properties[TOTAL_ENERGY] = energy
-        self.properties[DIPOLE_MOMENT] = dipole_moment
-        self.last_calculation = calc
+
         
     def calculateElectronAffinity(self, anion_spin=None):
         if anion_spin is None:
             anion_spin = (self.spin + 1) % 2
             
-        if self.needsEvaluation():
+        if self.needs_evaluation:
             self.runHartreeFock()
             
         neutral_energy = self.total_energy
@@ -316,7 +315,7 @@ class Polymorph:
         if neutral_energy == np.nan:
             print(f"Polymorph {self.id}: Energy of neutral molecule cannot be determined, " + \
                   "no use in running calculation for anion.")
-            self.properties[ELECTRON_AFFINITY] = np.nan
+            self.properties[Polymorph.ELECTRON_AFFINITY] = np.nan
             return
             
         anion = self.setupGeometryForCalculation(charge=self.charge-1, spin=anion_spin)
@@ -329,18 +328,18 @@ class Polymorph:
             print(f"Anion: E(ROHF) = {anion_energy:g} eV")
             electron_affinity = neutral_energy - anion_energy # > 0
             print(f"Electron affinity: {electron_affinity} eV")
-            self.properties[ELECTRON_AFFINITY] = electron_affinity
+            self.properties[Polymorph.ELECTRON_AFFINITY] = electron_affinity
             
         else:
             print(f"Polymorph {self.id}: Hartree-Fock calculation for anion did not converge!")
-            self.properties[ELECTRON_AFFINITY] = np.nan
+            self.properties[Polymorph.ELECTRON_AFFINITY] = np.nan
             return
 
     def calculateIonizationEnergy(self, cation_spin=None):
         if cation_spin is None:
             cation_spin = (self.spin + 1) % 2
     
-        if self.needsEvaluation():
+        if self.needs_evaluation:
             self.runHartreeFock()
     
         neutral_energy = self.total_energy
@@ -348,8 +347,8 @@ class Polymorph:
         if neutral_energy == np.nan:
             print(f"Polymorph {self.id}: Energy of neutral molecule cannot be determined, " + \
                   "no use in running calculation for cation.")
-            self.properties[IONIZATION_ENERGY] = np.nan
-            return
+            self.properties[Polymorph.IONIZATION_ENERGY] = np.nan
+            return None
     
         cation = self.setupGeometryForCalculation(charge=self.charge + 1, spin=cation_spin)
         print("Starting Hartree-Fock calculation for cation ...")
@@ -361,12 +360,12 @@ class Polymorph:
             print(f"Cation: E(ROHF) = {cation_energy:g} eV")
             ionization_energy = cation_energy - neutral_energy  # > 0
             print(f"Ionization energy: {ionization_energy} eV")
-            self.properties[IONIZATION_ENERGY] = ionization_energy
+            self.properties[Polymorph.IONIZATION_ENERGY] = ionization_energy
     
         else:
             print(f"Polymorph {self.id}: Hartree-Fock calculation for cation did not converge!")
-            self.properties[IONIZATION_ENERGY] = np.nan
-            return
+            self.properties[Polymorph.IONIZATION_ENERGY] = np.nan
+            return None
 
 
     # Visualization -------------------------------------------------------------------------------------------------
