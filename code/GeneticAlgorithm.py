@@ -165,6 +165,8 @@ class GeneticAlgorithm:
     def mutateAll(self, verbose=False):
         for p in self.polymorphs.values():
             p.mutateGenome()
+            
+        self.collectGenerationProperties()
         
   
 if __name__ is "__main__":
@@ -193,6 +195,7 @@ if __name__ is "__main__":
     energies_timeline.append(ga.properties.total_energy)
     
     for k in range(10):
+        ga.mutateAll()
         ga.attemptCrossovers(verbose=True)
         ga.generateOffsprings(verbose=True)
         ga.evaluateGeneration()
@@ -203,6 +206,6 @@ if __name__ is "__main__":
     
     energies_array = np.array(energies_timeline, dtype=float)
     
-    plt.imshow(energies_array.transpose(), cmap="viridis")
+    plt.imshow(energies_array.transpose(), cmap="RdYlGn_r")
     plt.colorbar()
     plt.show()

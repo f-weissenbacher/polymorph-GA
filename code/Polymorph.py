@@ -138,8 +138,7 @@ class Polymorph:
         self.structure.to_xyz(filename)
         
     def resetProperties(self):
-        self.properties.clear()
-        self.properties.fromkeys(Polymorph.DATA_FIELDS)
+        self.properties = defaultdict(lambda:np.nan).fromkeys(Polymorph.DATA_FIELDS)
         self.needs_evaluation = True
         
 
