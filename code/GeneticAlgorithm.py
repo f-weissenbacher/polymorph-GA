@@ -16,13 +16,22 @@ pybel.ipython_3d = True
 
 from IPython.display import display, HTML
 
+
+def renderPolymorphs(polymorphs, shader='basic'):
+    """ Displays geometries of all polymorphs in the current generation """
+    renders = (imolecule.draw(p.gzmat_string, format='gzmat', size=(200, 150),
+                              shader=shader, display_html=False, resizeable=False) \
+               for p in polymorphs)
+    columns = ('<div class="col-xs-6 col-sm-3">{}</div>'.format(r) for r in renders)
+    display(HTML('<div class="row">{}</div>'.format("".join(columns))))
+
 class GeneticAlgorithm:
     def __init__(self, factory: PolymorphFactory, generation_size=10, fitness_property=Polymorph.TOTAL_ENERGY):
         
         self.factory = factory
         self.generation_number = 0
         self.polymorphs = dict() # Current generation of polymorphs, polymorph id's are keys
-        self.properties = pd.DataFrame(columns=Polymorph.DATA_FIELDS)
+        self.properties = pd.DataFrame(columns=Polymorph.DATA_FIELDS, dtype=float)
         
         if fitness_property not in Polymorph.DATA_FIELDS:
             raise ValueError("Unknown fitness property. Valid options: " + \
@@ -72,7 +81,7 @@ class GeneticAlgorithm:
     
     def collectGenerationProperties(self):
         for p in self.polymorphs.values():
-            self.properties.loc[p.id,:] = p.properties
+            self.properties.loc[[p.id]] = pd.DataFrame.from_dict({p.id: p.properties}, orient='index', dtype=float)
     
     
     def listGenerationProperties(self):
@@ -88,7 +97,7 @@ class GeneticAlgorithm:
                 print(f"Polymorph {p.id} was mutated, needs evaluation")
                 p.runHartreeFock()
                 # Update Properties
-                self.properties.loc[p.id, :] = p.properties
+                self.properties.loc[[p.id]] = pd.DataFrame.from_dict({p.id: p.properties}, orient='index', dtype=float)
             else:
                 print(f"Polymorph {p.id} unchanged")
 
@@ -118,7 +127,7 @@ class GeneticAlgorithm:
                 self.polymorphs[p.id] = p
                 new_polymorphs_dict[p.id] = p.properties
                 
-        new_properties_df = pd.DataFrame.from_dict(new_polymorphs_dict, orient='index')
+        new_properties_df = pd.DataFrame.from_dict(new_polymorphs_dict, orient='index', dtype=float)
         self.properties = self.properties.append(new_properties_df)
 
 
@@ -137,7 +146,7 @@ class GeneticAlgorithm:
             self.polymorphs[child.id] = child
             children_properties_dict[child.id] = child.properties
     
-        children_properties = pd.DataFrame.from_dict(children_properties_dict, orient='index')
+        children_properties = pd.DataFrame.from_dict(children_properties_dict, orient='index', dtype=float)
         self.properties = self.properties.append(children_properties)
         
     def attemptCrossovers(self, valid_crossovers_only=False, verbose=False):
@@ -153,24 +162,47 @@ class GeneticAlgorithm:
             
         self.collectGenerationProperties()
         
+    def mutateAll(self, verbose=False):
+        for p in self.polymorphs.values():
+            p.mutateGenome()
+        
   
 if __name__ is "__main__":
     import os
     from os.path import join
+    import matplotlib.pyplot as plt
     molecules_dir = os.path.abspath(join(os.path.dirname(__file__),"../molecules"))
     testing_dir = os.path.abspath(join(os.path.dirname(__file__),"../testing"))
-    structure_filepath = join(molecules_dir, "ethane.xyz")
+    structure_filepath = join(molecules_dir, "CF3-CH3.xyz")
     
     os.chdir(testing_dir)
-    polymer_name = "ethane"
     mutation_rate = 0.05
-    crossover_rate = 0.1
-    factory = PolymorphFactory(structure_filepath, mutation_rate, crossover_rate, polymer_name)
+    crossover_rate = 0.0
+    factory = PolymorphFactory(structure_filepath, mutation_rate, crossover_rate)
     factory.freezeBonds('all')
     factory.setupDefaultMutators()
-    ga = GeneticAlgorithm(factory)
-    
+    ga = GeneticAlgorithm(factory, generation_size=6)
     ga.fillGeneration()
+
+    energies_timeline = list()
+    polymorphs_timeline = list()
     
+    ga.evaluateGeneration()
     
+    ga.properties.sort_values(ga.fitness_property, axis=0, inplace=True, ascending=True)
+    energies_timeline.append(ga.properties.total_energy)
     
+    for k in range(10):
+        ga.attemptCrossovers(verbose=True)
+        ga.generateOffsprings(verbose=True)
+        ga.evaluateGeneration()
+        ga.removeLeastFittest()
+        ga.properties.sort_values(ga.fitness_property, axis=0, inplace=True, ascending=True)
+        energies_timeline.append(ga.properties.total_energy.copy())
+        polymorphs_timeline.append(ga.polymorphs.copy())
+    
+    energies_array = np.array(energies_timeline, dtype=float)
+    
+    plt.imshow(energies_array.transpose(), cmap="viridis")
+    plt.colorbar()
+    plt.show()

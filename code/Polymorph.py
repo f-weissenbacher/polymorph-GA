@@ -168,9 +168,14 @@ class Polymorph:
         name = f"Child of {self.id} & {partner.id}"
         generation_number = max(self.generation_number, partner.generation_number) + 1
       
-        return Polymorph(new_zmat, self.bond_mutator, self.angle_mutator, self.dihedral_mutator,
+        new_polymorph = Polymorph(new_zmat, self.bond_mutator, self.angle_mutator, self.dihedral_mutator,
                          self._mutable_bonds, self._mutable_angles, self._mutable_dihedrals,
                          self.crossover_probability, name=name, generation_number=generation_number)
+        
+        print(f"--> Child polymorph: {new_polymorph.id}")
+        
+        return new_polymorph
+        
 
 
     def crossoverGenesWith(self, partner, validate_updates=False, verbose=False):
@@ -220,6 +225,8 @@ class Polymorph:
         if update_is_valid:
             self.zmat = new_zmatrix
             self.resetProperties()
+            
+        return update_is_valid
 
 
     def mutable_genes(self, gene_type):
@@ -372,7 +379,7 @@ class Polymorph:
     
     def visualize(self):
         atoms = self.structure.get_ase_atoms()
-        ase.visualize.view(atoms)
+        ase.visualize.view(atoms, name=f"ID_{self.id}_")
     
     
 
