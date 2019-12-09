@@ -4,6 +4,11 @@ import numpy as np
 
 from chemcoord import Zmat
 
+
+def fermiDistribution(x, mu, sigma):
+    return 1 / (1 + np.exp((x - mu)/sigma))
+
+# TODO: Write in C
 def checkAtomDistances(zmatrix: Zmat, threshold_factor=0.8):
     structure = zmatrix.get_cartesian()
     n_atoms = len(zmatrix)

@@ -6,7 +6,7 @@ import numpy as np
 
 from Utilities import checkAtomDistances
 from Polymorph import Polymorph
-from Mutators import FullRangeMutator, PlaceboMutator
+from Mutators import FullRangeMutator, PlaceboMutator, IncrementalMutator, MultiplicativeMutator
 
 
 class PolymorphFactory:
@@ -42,7 +42,7 @@ class PolymorphFactory:
         self.dihedral_value_range = [-180, 180]  # Degrees
         
         # Allowed ranges for single mutations of bond lengths, angles and dihedrals
-        self.bond_mutation_range = [0.5, 1.5]
+        self.bond_mutation_range = [0.2, 1.2]
         self.angle_mutation_range = [-30, 30]
         self.dihedral_mutation_range = [-30, 30]
         
@@ -117,9 +117,9 @@ class PolymorphFactory:
     
     # Mutators ---------------------------------------------------------------------
     def setupDefaultMutators(self):
-        self.bond_mutator = FullRangeMutator('bond', self.bond_value_range)
-        self.angle_mutator = FullRangeMutator('angle', self.angle_value_range)
-        self.dihedral_mutator = FullRangeMutator('dihedral', self.dihedral_value_range)
+        self.bond_mutator = MultiplicativeMutator('bond', self.bond_value_range, self.bond_mutation_range)
+        self.angle_mutator = IncrementalMutator('angle', self.angle_value_range, self.angle_mutation_range)
+        self.dihedral_mutator = IncrementalMutator('dihedral', self.dihedral_value_range, self.dihedral_mutation_range)
     
     # Generation of polymorphs -----------------------------------------------------
     def generateRandomPolymorph(self, valid_structure_only=True, n_max_restarts=2):

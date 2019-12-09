@@ -108,6 +108,13 @@ class Polymorph:
         return self.zmat.get_cartesian()
     
     @property
+    def real_structure(self):
+        """ Geometry in cartesian coordinates without any virtual atoms """
+        structure = self.zmat.get_cartesian()
+        virtual_atoms = structure['atom'] == 'X'
+        return structure[~virtual_atoms]
+    
+    @property
     def total_energy(self):
         return self.properties[Polymorph.TOTAL_ENERGY]
         
@@ -275,8 +282,9 @@ class Polymorph:
         if spin is None:
             spin = self.spin
             
+           
         mol = pyscf.gto.Mole()
-        mol.atom = self.zmat_string
+        mol.atom = self.real_structure.to_string(index=False, header=False)
         mol.basis = basis
         mol.charge = charge
         mol.spin = spin
@@ -286,11 +294,25 @@ class Polymorph:
         mol.build()
         return mol
     
-    def runHartreeFock(self, basis=None, charge=None, spin=None, verbosity=None):
+    def runHartreeFock(self, basis=None, charge=None, spin=None, verbosity=None, run_dir=None):
+        """
+        Sets up and runs a (restricted) Hartree-Fock calculation
+        :param basis:
+        :param charge:
+        :param spin:
+        :param verbosity:
+        :param run_dir: Path to folder to which the chkfile is written to. Default: os.getcwd()
+        """
+        
+        if run_dir is None:
+            run_dir = os.getcwd()
+        
         mol = self.setupGeometryForCalculation(basis, charge, spin, verbosity)
         print("Starting restricted Hartree-Fock calculation ...")
         calc = pyscf.scf.RHF(mol)
-        calc.kernel() # Needed to collect results of the calculation (I guess)
+        
+        calc.chkfile = os.path.join(run_dir,f"pm-{self.id}_ch{mol.charge}_s{mol.spin}.chk")
+        calc.kernel() # Executes the calculation
        
         if calc.converged:
             energy = calc.e_tot * HARTREE_IN_EV
@@ -309,12 +331,15 @@ class Polymorph:
         
 
         
-    def calculateElectronAffinity(self, anion_spin=None):
+    def calculateElectronAffinity(self, anion_spin=None, run_dir=None):
         if anion_spin is None:
             anion_spin = (self.spin + 1) % 2
             
+        if run_dir is None:
+            run_dir = os.getcwd()
+            
         if self.needs_evaluation:
-            self.runHartreeFock()
+            self.runHartreeFock(run_dir=run_dir)
             
         neutral_energy = self.total_energy
         
@@ -327,6 +352,7 @@ class Polymorph:
         anion = self.setupGeometryForCalculation(charge=self.charge-1, spin=anion_spin)
         print("Starting Hartree-Fock calculation for anion ...")
         calc = pyscf.scf.RHF(anion)
+        calc.chkfile = os.path.join(run_dir,f"pm-{self.id}_ch{anion.charge}_s{anion.spin}.chk")
         calc.kernel()  # Needed to collect results of the calculation (I guess)
 
         if calc.converged:
@@ -341,12 +367,15 @@ class Polymorph:
             self.properties[Polymorph.ELECTRON_AFFINITY] = np.nan
             return
 
-    def calculateIonizationEnergy(self, cation_spin=None):
+    def calculateIonizationEnergy(self, cation_spin=None, run_dir=None):
         if cation_spin is None:
             cation_spin = (self.spin + 1) % 2
+            
+        if run_dir is None:
+            run_dir = os.getcwd()
     
         if self.needs_evaluation:
-            self.runHartreeFock()
+            self.runHartreeFock(run_dir=run_dir)
     
         neutral_energy = self.total_energy
     
@@ -359,6 +388,7 @@ class Polymorph:
         cation = self.setupGeometryForCalculation(charge=self.charge + 1, spin=cation_spin)
         print("Starting Hartree-Fock calculation for cation ...")
         calc = pyscf.scf.RHF(cation)
+        calc.chkfile = os.path.join(run_dir, f"pm-{self.id}_ch{cation.charge}_s{cation.spin}.chk")
         calc.kernel()  # Needed to collect results of the calculation (I guess)
     
         if calc.converged:

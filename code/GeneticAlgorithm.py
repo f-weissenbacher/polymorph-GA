@@ -1,6 +1,6 @@
 import imolecule
 from imolecule import format_converter
-from Utilities import checkAtomDistances
+from Utilities import checkAtomDistances, fermiDistribution
 import Polymorph
 from Polymorph import Polymorph
 from PolymorphFactory import PolymorphFactory
@@ -11,11 +11,20 @@ import pandas as pd
 import numpy as np
 import time
 import pybel
+import shutil
+import os
 
 pybel.ipython_3d = True
 
 from IPython.display import display, HTML
 
+
+def makeSureDirectoryExists(dirpath, overwrite=False):
+    if not os.path.isdir(dirpath):
+        os.mkdir(dirpath)
+    elif overwrite:
+        shutil.rmtree(dirpath)
+        os.mkdir(dirpath)
 
 def renderPolymorphs(polymorphs, shader='basic'):
     """ Displays geometries of all polymorphs in the current generation """
@@ -26,7 +35,8 @@ def renderPolymorphs(polymorphs, shader='basic'):
     display(HTML('<div class="row">{}</div>'.format("".join(columns))))
 
 class GeneticAlgorithm:
-    def __init__(self, factory: PolymorphFactory, generation_size=10, fitness_property=Polymorph.TOTAL_ENERGY):
+    def __init__(self, factory: PolymorphFactory, generation_size=10, fitness_property=Polymorph.TOTAL_ENERGY,
+                 work_dir=None):
         
         self.factory = factory
         self.generation_number = 0
@@ -40,6 +50,14 @@ class GeneticAlgorithm:
         self.fitness_property = fitness_property
         self.generation_size = generation_size
         
+        if work_dir is None:
+            work_dir = os.getcwd()
+            
+        self.work_dir = work_dir
+        self.pyscf_calc_dir = os.path.join(work_dir, "pyscf-calculations")
+        makeSureDirectoryExists(self.pyscf_calc_dir)
+        
+        
     def saveState(self, folder):
         pass
     
@@ -47,30 +65,77 @@ class GeneticAlgorithm:
     @classmethod
     def loadState(cls, folder):
         pass
+    
+    
+    def removePolymorphs(self, polymorphs_to_drop):
+        """ Removes specified polymorphs from the current generation. Properties DataFrame is updated accordingly
+        :param polymorphs_to_drop: list or array of IDs of the polymorphs that shall be removed
+        """
+        for polymorph_id in polymorphs_to_drop:
+            self.polymorphs.pop(polymorph_id)
+    
+        self.properties = self.properties.drop(polymorphs_to_drop, axis=0)
 
 
-    def removeLeastFittest(self):
-        """"Removes least fittest polymorphs from the current generation"""
+    def discardLeastFittest(self):
+        """" Shrinks current generation back to the default generation size by removing the least fittest polymorphs """
         self.properties.sort_values(self.fitness_property, axis=0, inplace=True, ascending=True)
         #showGenerationState(polymorphs)
         polymorphs_to_drop = self.properties.index[self.generation_size:]
-
-        for polymorph_id in polymorphs_to_drop:
-            self.polymorphs.pop(polymorph_id)
-            
-        self.properties = self.properties.drop(polymorphs_to_drop, axis=0)
+        self.removePolymorphs(polymorphs_to_drop)
         
+    
+    def discardRandomPolymorphs(self):
+        """" Shrinks current generation back to the default generation size by randomly removing polymorphs """
+        n_to_drop = len(self.polymorphs)-self.generation_size
+        
+        if n_to_drop > 0:
+            polymorphs_to_drop = np.random.choice(self.properties.index, (n_to_drop,), replace=False)
+            self.removePolymorphs(polymorphs_to_drop)
 
-    def selectFromDistribution(self, type='fermi'):
-        """ Selects polymorphs based on a probability distribution """
-        pass
-  
+    def discardByFermiDistribution(self, sigma=None):
+        """" Shrinks current generation back to the default generation size by removing polymorphs based on a
+        probability distribution
+        """
+
+        n_to_drop = len(self.polymorphs)-self.generation_size
+        
+        if n_to_drop <= 0:
+            print("Current generation size is less or equal then the default size, " + \
+                  "therefore no need to discard polymopphs")
+            return
+        
+        # Sort by fitness_property
+        self.properties.sort_values(self.fitness_property, axis=0, inplace=True, ascending=True)
+        fitness_values = self.properties[self.fitness_property]
+        min_value = np.nanmin(self.properties[self.fitness_property])
+        max_value = np.nanmax(self.properties[self.fitness_property])
+        cutoff_value = 0.5 * (fitness_values.iloc[-(n_to_drop+1)] + fitness_values.iloc[-n_to_drop])
+        
+        if sigma is None:
+            sigma = 0.05 * (max_value - min_value)
+
+        polymorphs_to_drop = []
+        polymorphs_to_keep = list(self.polymorphs.keys())
+        
+        while len(polymorphs_to_drop) < n_to_drop:
+            for pm_id in polymorphs_to_keep:
+                occupation_chance = fermiDistribution(fitness_values.loc[pm_id], cutoff_value, sigma)
+                if np.random.rand() > occupation_chance:
+                    # Drop this polymorph
+                    polymorphs_to_drop.append(pm_id)
+                    polymorphs_to_keep.remove(pm_id)
+                if len(polymorphs_to_drop) == n_to_drop:
+                    break
+                    
+        self.removePolymorphs(polymorphs_to_drop)
+            
     
     def renderCurrentGeneration(self, shader='basic'):
         """ Displays geometries of all polymorphs in the current generation """
         renders = (imolecule.draw(p.gzmat_string, format='gzmat', size=(200, 150),
                                   shader=shader, display_html=False, resizeable=False) \
-                   for p in self.polymorphs)
+                   for p in self.polymorphs.values())
         columns = ('<div class="col-xs-6 col-sm-3">{}</div>'.format(r) for r in renders)
         display(HTML('<div class="row">{}</div>'.format("".join(columns))))
         
@@ -95,7 +160,7 @@ class GeneticAlgorithm:
         for p in self.polymorphs.values():
             if p.needs_evaluation:
                 print(f"Polymorph {p.id} was mutated, needs evaluation")
-                p.runHartreeFock()
+                p.runHartreeFock(run_dir=self.pyscf_calc_dir)
                 # Update Properties
                 self.properties.loc[[p.id]] = pd.DataFrame.from_dict({p.id: p.properties}, orient='index', dtype=float)
             else:
@@ -168,6 +233,21 @@ class GeneticAlgorithm:
             
         self.collectGenerationProperties()
         
+    def doGenerationStep(self, discard_mode='least-fittest',verbose=True):
+        self.mutateAll()
+        self.attemptCrossovers(verbose=verbose)
+        self.generateOffsprings(verbose=verbose)
+        self.evaluateGeneration()
+        
+        if discard_mode == 'least-fittest':
+            self.discardLeastFittest()
+        elif discard_mode == 'random':
+            self.discardRandomPolymorphs()
+        elif discard_mode == 'fermi':
+            self.discardByFermiDistribution()
+        else:
+            ValueError("Unknown discard mode. Valid options are: 'least-fittest', 'random' and 'fermi'")
+        
   
 if __name__ is "__main__":
     import os
@@ -183,7 +263,7 @@ if __name__ is "__main__":
     factory = PolymorphFactory(structure_filepath, mutation_rate, crossover_rate)
     factory.freezeBonds('all')
     factory.setupDefaultMutators()
-    ga = GeneticAlgorithm(factory, generation_size=6)
+    ga = GeneticAlgorithm(factory, generation_size=20)
     ga.fillGeneration()
 
     energies_timeline = list()
@@ -194,15 +274,18 @@ if __name__ is "__main__":
     ga.properties.sort_values(ga.fitness_property, axis=0, inplace=True, ascending=True)
     energies_timeline.append(ga.properties.total_energy)
     
-    for k in range(10):
+    for k in range(40):
+        print(f"Iteration {k}")
         ga.mutateAll()
         ga.attemptCrossovers(verbose=True)
         ga.generateOffsprings(verbose=True)
         ga.evaluateGeneration()
-        ga.removeLeastFittest()
+        #ga.discardByFermiDistribution(5.0)
+        ga.discardLeastFittest()
         ga.properties.sort_values(ga.fitness_property, axis=0, inplace=True, ascending=True)
         energies_timeline.append(ga.properties.total_energy.copy())
         polymorphs_timeline.append(ga.polymorphs.copy())
+        print("=" * 60)
     
     energies_array = np.array(energies_timeline, dtype=float)
     
