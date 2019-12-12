@@ -117,9 +117,12 @@ class PolymorphFactory:
     
     # Mutators ---------------------------------------------------------------------
     def setupDefaultMutators(self):
-        self.bond_mutator = MultiplicativeMutator('bond', self.bond_value_range, self.bond_mutation_range)
-        self.angle_mutator = IncrementalMutator('angle', self.angle_value_range, self.angle_mutation_range)
-        self.dihedral_mutator = IncrementalMutator('dihedral', self.dihedral_value_range, self.dihedral_mutation_range)
+        self.bond_mutator = MultiplicativeMutator('bond', self.bond_value_range, self.bond_mutation_range,
+                                                  mutation_rate=self.default_mutation_rate)
+        self.angle_mutator = IncrementalMutator('angle', self.angle_value_range, self.angle_mutation_range,
+                                                gene_is_periodic=False, mutation_rate=self.default_mutation_rate)
+        self.dihedral_mutator = IncrementalMutator('dihedral', self.dihedral_value_range, self.dihedral_mutation_range,
+                                                   gene_is_periodic=True, mutation_rate=self.default_mutation_rate)
     
     # Generation of polymorphs -----------------------------------------------------
     def generateRandomPolymorph(self, valid_structure_only=True, n_max_restarts=2):

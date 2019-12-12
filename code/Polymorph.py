@@ -27,11 +27,13 @@ import imolecule
 #from ase.visualize import view
 
 from Utilities import checkAtomDistances
-from Mutators import FullRangeMutator
+from Mutators import Mutator
 
 import pyscf
 
 HARTREE_IN_EV = 27.211386245988
+
+cc.settings['defaults']['viewer'] = 'ase-gui'
 
 class Polymorph:
     # Function to generate new, unique IDs
@@ -175,13 +177,12 @@ class Polymorph:
         generation_number = max(self.generation_number, partner.generation_number) + 1
       
         new_polymorph = Polymorph(new_zmat, self.bond_mutator, self.angle_mutator, self.dihedral_mutator,
-                         self._mutable_bonds, self._mutable_angles, self._mutable_dihedrals,
-                         self.crossover_probability, name=name, generation_number=generation_number)
+                                  self._mutable_bonds, self._mutable_angles, self._mutable_dihedrals,
+                                  self.crossover_probability, name=name, generation_number=generation_number)
         
         print(f"--> Child polymorph: {new_polymorph.id}")
         
         return new_polymorph
-        
 
 
     def crossoverGenesWith(self, partner, validate_updates=False, verbose=False):
@@ -245,30 +246,51 @@ class Polymorph:
         else:
             raise ValueError("Unknown gene type. Valid options are: " + str(Polymorph.GENE_TYPES))
 
-    def mutateBonds(self):
+
+    def _mutate_gene(self, mutator:Mutator, mutable_genes, verbose=False):
+        target_gene = mutator.target_gene
+        if verbose:
+            print(f"Polymorph {self.id}: Attempting to mutate {target_gene}(s) ...")
+        new_zmat, genes_altered = mutator.mutate(self.zmat, mutable_genes, verbose=verbose)
+        
+        if genes_altered:
+            mutation_successful = self.applyMutation(new_zmat)
+            if verbose:
+                if mutation_successful:
+                    print(f"Polymorph {self.id}: Mutation of {target_gene}(s) was applied successfully")
+                else:
+                    print(f"Polymorph {self.id}: Proposed mutation of {target_gene}(s) was invalid")
+        elif verbose:
+            print(f"Polymorph {self.id}: No mutation of {target_gene}(s) triggered")
+            
+            
+    def mutateBonds(self, verbose=False):
         """
         Attempts to mutate bond length of each mutable bond. If one or more bonds are altered, the calculated properties
         of the polymorph are reset.
         """
-        new_zmat, bondlengths_altered = self.bond_mutator.mutate(self.zmat, self._mutable_bonds)
-        if bondlengths_altered:
-            self.applyMutation(new_zmat)
+        
+        self._mutate_gene(self.bond_mutator, self._mutable_bonds, verbose)
             
-    def mutateAngles(self):
-        new_zmat, angles_altered = self.angle_mutator.mutate(self.zmat, self._mutable_angles)
-        if angles_altered:
-            self.applyMutation(new_zmat)
-    
-    def mutateDihedrals(self):
-        new_zmat, dihedrals_altered = self.dihedral_mutator.mutate(self.zmat, self._mutable_dihedrals)
-        if dihedrals_altered:
-            self.applyMutation(new_zmat)
+    def mutateAngles(self, verbose=False):
+        """
+        Attempts to mutate each mutable angle. If one or more angles are altered, the calculated properties
+        of the polymorph are reset.
+        """
+        self._mutate_gene(self.angle_mutator, self._mutable_angles, verbose)
             
-    def mutateGenome(self):
+    def mutateDihedrals(self, verbose=False):
+        """
+        Attempts to mutate each mutable dihedral. If one or more dihedrals are altered, the calculated properties
+        of the polymorph are reset.
+        """
+        self._mutate_gene(self.dihedral_mutator, self._mutable_dihedrals, verbose)
+            
+    def mutateGenome(self, verbose=False):
         """ Attempts to mutate all mutable bond lengths, angles and dihedrals of the polymorph (in that order) """
-        self.mutateBonds()
-        self.mutateAngles()
-        self.mutateDihedrals()
+        self.mutateBonds(verbose=verbose)
+        self.mutateAngles(verbose=verbose)
+        self.mutateDihedrals(verbose=verbose)
 
 
     # SCF Calculations ----------------------------------------------------------------------------------------------- #

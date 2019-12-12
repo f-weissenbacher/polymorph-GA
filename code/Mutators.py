@@ -24,18 +24,20 @@ class Mutator:
 
     def validateValue(self, value):
         if self.gene_is_periodic:
-            valid_value = (value - self.gene_value_range[0]) % self.gene_value_span
+            valid_value = (value - self.gene_value_range[0]) % self.gene_value_span + self.gene_value_range[0]
         else:
             if value < self.gene_value_range[0]:
                 valid_value = self.gene_value_range[0]
-            else:
+            elif value > self.gene_value_range[1]:
                 valid_value = self.gene_value_range[1]
+            else:
+                valid_value = value
 
         return valid_value
     
    
     # Abstract function definition, needs to implemented in child classes
-    def mutate(self, zmatrix: Zmat, mutable_genes_indices):
+    def mutate(self, zmatrix: Zmat, mutable_genes_indices, verbose):
         """
         :param Zmat zmatrix: z-matrix of the polymorph
         :param mutable_genes_indices:
@@ -57,10 +59,11 @@ class IncrementalMutator(Mutator):
         self.mutation_range = mutation_range
         self.mutation_span = np.diff(mutation_range)[0]
 
-    def mutate(self, zmatrix: Zmat, mutable_genes_indices):
+    def mutate(self, zmatrix: Zmat, mutable_genes_indices, verbose=False):
         """
         :param Zmat zmatrix: z-matrix of the polymorph
         :param mutable_genes_indices:
+        :param bool verbose:
         :return Zmat new_zmatrix: z-matrix after mutation.
         :return bool genes_altered: 'True' if one ore more of the targeted genes have been mutated, 'False' if not
         """
@@ -68,8 +71,11 @@ class IncrementalMutator(Mutator):
         new_zmatrix = zmatrix.copy()
         for gene_index in mutable_genes_indices:
             if np.random.rand() < self.mutation_probability:
-                new_value = zmatrix.loc[gene_index, self.target_gene] + np.random.rand() * self.mutation_span
+                old_value = zmatrix.loc[gene_index, self.target_gene]
+                new_value = old_value + (np.random.rand() - 0.5) * self.mutation_span
                 new_value = self.validateValue(new_value)
+                if verbose:
+                    print(f"  {self.target_gene} {gene_index}: {old_value} --> {new_value}")
                 new_zmatrix.safe_loc[gene_index, self.target_gene] = new_value
                 genes_altered = True
                 
@@ -89,13 +95,16 @@ class MultiplicativeMutator(Mutator):
         self.scaling_range = mutation_scaling_range
         self.scaling_span = np.diff(mutation_scaling_range)
 
-    def mutate(self, zmatrix: Zmat, mutable_genes_indices):
+    def mutate(self, zmatrix: Zmat, mutable_genes_indices, verbose=False):
         genes_altered = False
         new_zmatrix = zmatrix.copy()
         for gene_index in mutable_genes_indices:
             if np.random.rand() < self.mutation_probability:
+                old_value = zmatrix.loc[gene_index, self.target_gene]
                 factor =  self.scaling_range[0] + np.random.rand() * self.scaling_span
-                new_value = self.validateValue(zmatrix.loc[gene_index, self.target_gene] * factor)
+                new_value = self.validateValue(old_value * factor)
+                if verbose:
+                    print(f"  {self.target_gene} {gene_index}: {old_value} --> {new_value}")
                 new_zmatrix.safe_loc[gene_index, self.target_gene] = new_value
                 genes_altered = True
 
@@ -113,12 +122,15 @@ class FullRangeMutator(Mutator):
         super().__init__(target_gene, gene_value_range, False, mutation_rate)
 
 
-    def mutate(self, zmatrix: Zmat, mutable_genes_indices):
+    def mutate(self, zmatrix: Zmat, mutable_genes_indices, verbose=False):
         new_zmatrix = zmatrix.copy()
         genes_altered = False
         for gene_index in mutable_genes_indices:
             if np.random.rand() < self.mutation_probability:
+                old_value = zmatrix.loc[gene_index, self.target_gene]
                 new_value = self.gene_value_range[0] + np.random.rand() * self.gene_value_span
+                if verbose:
+                    print(f"  {self.target_gene} {gene_index}: {old_value} --> {new_value}")
                 zmatrix.safe_loc[gene_index, self.target_gene] = new_value
                 genes_altered = True
 
@@ -126,12 +138,12 @@ class FullRangeMutator(Mutator):
             
 
 class PlaceboMutator(Mutator):
-    """ Mutator class that provides the same functions as all other mutators, but doesn't acutally mutate the polymorph"""
+    """ Mutator class that provides the same functions as all other mutators, but doesn't actually mutate the polymorph"""
     
     def __init__(self, target_gene):
         super().__init__(target_gene,[0,1], False, 0.0)
         
-    def mutate(self, zmatrix: Zmat, mutable_genes_indices):
+    def mutate(self, zmatrix: Zmat, mutable_genes_indices=(), verbose=False):
         return zmatrix, False
         
 

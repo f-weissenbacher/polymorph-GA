@@ -13,6 +13,7 @@ import time
 import pybel
 import shutil
 import os
+import pickle
 
 pybel.ipython_3d = True
 
@@ -39,7 +40,7 @@ class GeneticAlgorithm:
                  work_dir=None):
         
         self.factory = factory
-        self.generation_number = 0
+        self.current_generation_number = 0
         self.polymorphs = dict() # Current generation of polymorphs, polymorph id's are keys
         self.properties = pd.DataFrame(columns=Polymorph.DATA_FIELDS, dtype=float)
         
@@ -50,6 +51,8 @@ class GeneticAlgorithm:
         self.fitness_property = fitness_property
         self.generation_size = generation_size
         
+        self.generation_timeline = []
+        
         if work_dir is None:
             work_dir = os.getcwd()
             
@@ -59,7 +62,10 @@ class GeneticAlgorithm:
         
         
     def saveState(self, folder):
-        pass
+        # Polymorph factory
+        with open("polymorph_factory.pkl", 'wb') as factory_file:
+            pickle.dump(self.factory, factory_file)
+        
     
     
     @classmethod
@@ -229,12 +235,12 @@ class GeneticAlgorithm:
         
     def mutateAll(self, verbose=False):
         for p in self.polymorphs.values():
-            p.mutateGenome()
+            p.mutateGenome(verbose=verbose)
             
         self.collectGenerationProperties()
         
-    def doGenerationStep(self, discard_mode='least-fittest',verbose=True):
-        self.mutateAll()
+    def doGenerationStep(self, discard_mode='least-fittest', verbose=True):
+        self.mutateAll(verbose=verbose)
         self.attemptCrossovers(verbose=verbose)
         self.generateOffsprings(verbose=verbose)
         self.evaluateGeneration()
@@ -247,6 +253,9 @@ class GeneticAlgorithm:
             self.discardByFermiDistribution()
         else:
             ValueError("Unknown discard mode. Valid options are: 'least-fittest', 'random' and 'fermi'")
+            
+        self.generation_timeline.append(self.polymorphs.copy())
+        self.current_generation_number += 1
         
   
 if __name__ is "__main__":
@@ -263,7 +272,7 @@ if __name__ is "__main__":
     factory = PolymorphFactory(structure_filepath, mutation_rate, crossover_rate)
     factory.freezeBonds('all')
     factory.setupDefaultMutators()
-    ga = GeneticAlgorithm(factory, generation_size=20)
+    ga = GeneticAlgorithm(factory, generation_size=10)
     ga.fillGeneration()
 
     energies_timeline = list()
@@ -276,8 +285,8 @@ if __name__ is "__main__":
     
     for k in range(40):
         print(f"Iteration {k}")
-        ga.mutateAll()
-        ga.attemptCrossovers(verbose=True)
+        ga.mutateAll(verbose=True)
+        ga.attemptCrossovers(verbose=False)
         ga.generateOffsprings(verbose=True)
         ga.evaluateGeneration()
         #ga.discardByFermiDistribution(5.0)
