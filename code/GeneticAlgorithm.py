@@ -15,6 +15,8 @@ import shutil
 import os
 import pickle
 
+import configparser
+
 pybel.ipython_3d = True
 
 from IPython.display import display, HTML
@@ -62,15 +64,59 @@ class GeneticAlgorithm:
         
         
     def saveState(self, folder):
-        # Polymorph factory
-        with open("polymorph_factory.pkl", 'wb') as factory_file:
-            pickle.dump(self.factory, factory_file)
+        makeSureDirectoryExists(folder)
         
-    
+        factory_filepath = os.path.join(folder, "polymorph_factory.pkl")
+        timeline_filepath = os.path.join(folder, "generation_timeline.pkl")
+        config_filepath = os.path.join(folder, "settings.config")
+        
+        # Config file:
+        config = configparser.ConfigParser()
+        config['Algorithm Settings'] = {'fitness_property' : self.fitness_property,
+                                        'generation_size' : self.generation_size,
+                                        'current_generation_number' : self.current_generation_number }
+        
+        with open(config_filepath, 'w') as config_file:
+            config.write(config_file)
+        
+        # Polymorph factory
+        with open(factory_filepath, 'wb') as factory_file:
+            pickle.dump(self.factory, factory_file)
+            
+        # Generation timeline (Polymorphs of each generation
+        with open(timeline_filepath, 'wb') as timeline_file:
+            pickle.dump(self.generation_timeline, timeline_file)
+
     
     @classmethod
     def loadState(cls, folder):
-        pass
+        factory_filepath = os.path.join(folder, "polymorph_factory.pkl")
+        timeline_filepath = os.path.join(folder, "generation_timeline.pkl")
+        config_filepath = os.path.join(folder, "settings.config")
+
+        config = configparser.ConfigParser()
+        config.read(config_filepath)
+    
+        generation_size = config['Algorithm Settings']['generation_size']
+        generation_number = config['Algorithm Settings']['current_generation_number']
+        fitness_property = config['Algorithm Settings']['fitness_property']
+
+    
+        # Polymorph factory
+        with open(factory_filepath, 'rb') as factory_file:
+            factory = pickle.load(factory_file)
+
+        # Generation timeline (Polymorphs of each generation
+        with open(timeline_filepath, 'rb') as timeline_file:
+            generation_timeline = pickle.load(timeline_file)
+            
+        ga = cls.__init__(factory, generation_size, fitness_property, work_dir=folder)
+        
+        ga.current_generation_number = generation_number
+        ga.generation_timeline = generation_timeline
+        ga.polymorphs = ga.generation_timeline[-1].copy()
+        
+        return ga
     
     
     def removePolymorphs(self, polymorphs_to_drop):
@@ -283,7 +329,7 @@ if __name__ is "__main__":
     ga.properties.sort_values(ga.fitness_property, axis=0, inplace=True, ascending=True)
     energies_timeline.append(ga.properties.total_energy)
     
-    for k in range(40):
+    for k in range(10):
         print(f"Iteration {k}")
         ga.mutateAll(verbose=True)
         ga.attemptCrossovers(verbose=False)
