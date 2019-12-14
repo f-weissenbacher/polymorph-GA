@@ -8,6 +8,12 @@ from chemcoord import Zmat
 def fermiDistribution(x, mu, sigma):
     return 1 / (1 + np.exp((x - mu)/sigma))
 
+
+def minimalDistanceThreshold(element_a, element_b, threshold_factor=0.8):
+    radius_a = ase.data.covalent_radii[ase.data.atomic_numbers[element_a]] * threshold_factor
+    radius_b = ase.data.covalent_radii[ase.data.atomic_numbers[element_b]] * threshold_factor
+    return radius_a + radius_b
+
 # TODO: Write in C
 def checkAtomDistances(zmatrix: Zmat, threshold_factor=0.8):
     structure = zmatrix.get_cartesian()

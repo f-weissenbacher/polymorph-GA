@@ -50,15 +50,18 @@ class Polymorph:
     GENE_TYPES = ('bond', 'angle', 'dihedral')
     
     @classmethod
-    def resetIdCounter(cls):
-        cls._generate_id = itertools.count().__next__
+    def resetIdCounter(cls, first_id=0):
+        cls._generate_id = itertools.count(first_id).__next__
 
     def __init__(self, zmatrix, bond_mutator, angle_mutator, dihedral_mutator,
                  mutable_bonds=None, mutable_angles=None, mutable_dihedrals=None,
-                 crossover_rate=1e-3, name="", generation_number=-1):
+                 crossover_rate=1e-3, name="", generation_number=-1, custom_id=None):
 
         self.name = name
-        self.id = Polymorph._generate_id()
+        if custom_id is None:
+            self.id = Polymorph._generate_id()
+        else:
+            self.id = custom_id
         self.generation_number = generation_number
         self.bond_mutator = bond_mutator
         self.angle_mutator = angle_mutator
@@ -107,7 +110,7 @@ class Polymorph:
     
     @property
     def structure(self):
-        return self.zmat.get_cartesian()
+        return self.zmat.get_cartesian().sort_index()
     
     @property
     def real_structure(self):
@@ -143,9 +146,12 @@ class Polymorph:
     def zmat_string(self):
         return self.zmat.to_zmat(upper_triangle=False)
 
+    # Loading/Saving ------------------------------------------------------------------------------------------------- #
     def saveStructure(self, filename):
         self.structure.to_xyz(filename)
         
+    #def save(self, ):
+    
     def resetProperties(self):
         self.properties = defaultdict(lambda:np.nan).fromkeys(Polymorph.DATA_FIELDS)
         self.needs_evaluation = True
@@ -180,7 +186,8 @@ class Polymorph:
                                   self._mutable_bonds, self._mutable_angles, self._mutable_dihedrals,
                                   self.crossover_probability, name=name, generation_number=generation_number)
         
-        print(f"--> Child polymorph: {new_polymorph.id}")
+        if verbose:
+            print(f"--> Child polymorph: {new_polymorph.id}")
         
         return new_polymorph
 
@@ -194,7 +201,7 @@ class Polymorph:
         partner_zmatrix = partner.zmat.copy()
         
         if verbose:
-            print(f"Attempting gene crossover between polymorphs {self.id} and {partner.id}")
+            print(f"Trying gene crossover between polymorphs {self.id} and {partner.id}")
 
         for bond_index in self._mutable_bonds:
             if np.random.rand() < self.crossover_probability:
@@ -218,8 +225,23 @@ class Polymorph:
                 partner_zmatrix.safe_loc[dihedral_index, 'dihedral'] = own_dihedral
                 
         if genomes_altered:
-            self.applyMutation(own_zmatrix, validate_updates)
-            partner.applyMutation(partner_zmatrix, validate_updates)
+            success_self = self.applyMutation(own_zmatrix, validate_updates)
+            success_partner = partner.applyMutation(partner_zmatrix, validate_updates)
+            if verbose:
+                text = f"Transfer {self.id} -> {partner.id}: "
+                if success_partner:
+                    text += "successful"
+                else:
+                    text += "not successful"
+                text += f"; Transfer {partner.id} -> {self.id}:"
+                if success_self:
+                    text += "successful"
+                else:
+                    text += "not successful"
+                print(text)
+        elif verbose:
+            print("No crossover event triggered")
+            
           
     # Mutations ------------------------------------------------------------------------------------------------------ #
 
@@ -388,7 +410,7 @@ class Polymorph:
             print(f"Polymorph {self.id}: Hartree-Fock calculation for anion did not converge!")
             self.properties[Polymorph.ELECTRON_AFFINITY] = np.nan
             return
-
+        
     def calculateIonizationEnergy(self, cation_spin=None, run_dir=None):
         if cation_spin is None:
             cation_spin = (self.spin + 1) % 2
@@ -436,8 +458,11 @@ class Polymorph:
 
 
 if __name__ == "__main__":
-  # Test polymorph class
-  pass
-#  for k in range(10):
-#    pm = Polymorph(f"Polymorph {k}")
-#    print(pm)
+    import chemcoord as cc
+    from Mutators import PlaceboMutator
+    structure = cc.Cartesian.read_xyz("../molecules/dihedral_tm1.xyz")
+    zmat = structure.get_zmat()
+    bond_mutator = PlaceboMutator('bond')
+    angle_mutator = PlaceboMutator('angle')
+    dihedral_mutator = PlaceboMutator('dihedral')
+    pm = Polymorph(zmat, bond_mutator, angle_mutator, dihedral_mutator)

@@ -4,7 +4,6 @@ from ase import data
 
 from chemcoord import Zmat
 
-from Utilities import checkAtomDistances
 
 class Mutator:
     """ Base class of molecular structure mutators acting on z-matrices (chemcoord.Zmat) """
@@ -148,7 +147,22 @@ class PlaceboMutator(Mutator):
         
 
 if __name__ == "__main__":
+    import pickle, os
     m = Mutator('bond', (1.5,2.0), False)
     mm = MultiplicativeMutator('bond', (0.2, 2.0), (0.75,1.25))
     frm = FullRangeMutator('angle', (0,180))
     im = IncrementalMutator('angle', (0,180), (-10,10), True)
+    
+    mutators = [m, mm, frm, im]
+    
+    for k,mutator in enumerate(mutators):
+        with open(f"mutator_{k}.pkl", 'wb') as file:
+            pickle.dump(mutator, file)
+            
+            
+    mutators_reloaded = []
+    for k in range(4):
+        with open(f"mutator_{k}.pkl", 'rb') as file:
+            mutator = pickle.load(file)
+            mutators_reloaded.append(mutator)
+            
