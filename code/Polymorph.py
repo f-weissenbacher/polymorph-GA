@@ -21,8 +21,8 @@ from collections import Iterable, Collection, defaultdict
 import numpy as np
 import pandas as pd
 import ase
-from ase import data
-from ase import visualize
+
+from ase import visualize, neighborlist
 import imolecule
 #from ase.visualize import view
 
@@ -46,16 +46,22 @@ class Polymorph:
     IONIZATION_ENERGY = "ionization_energy"
     ELECTRON_AFFINITY = "electron_affinity"
     DATA_FIELDS = (TOTAL_ENERGY, DIPOLE_MOMENT) + DIPOLE_VEC_FIELDS + (IONIZATION_ENERGY, ELECTRON_AFFINITY)
+    DATA_UNITS = {TOTAL_ENERGY:'eV',
+                  DIPOLE_MOMENT:'Debye',
+                  DIPOLE_VEC_FIELDS[0]: 'Debye', DIPOLE_VEC_FIELDS[1]: 'Debye', DIPOLE_VEC_FIELDS[2]: 'Debye',
+                  IONIZATION_ENERGY: 'eV', ELECTRON_AFFINITY: 'eV'}
     
     GENE_TYPES = ('bond', 'angle', 'dihedral')
     
+    # Class methods -------------------------------------------------------------------------------------------------- #
     @classmethod
     def resetIdCounter(cls, first_id=0):
         cls._generate_id = itertools.count(first_id).__next__
 
+    # Constructor and other __functions__ ---------------------------------------------------------------------------- #
     def __init__(self, zmatrix, bond_mutator, angle_mutator, dihedral_mutator,
                  mutable_bonds=None, mutable_angles=None, mutable_dihedrals=None,
-                 crossover_rate=1e-3, name="", generation_number=-1, custom_id=None):
+                 crossover_rate=1e-3, bond_map=None, name="", generation_number=-1, custom_id=None):
 
         self.name = name
         if custom_id is None:
@@ -83,6 +89,9 @@ class Polymorph:
         self.charge = 0 # Electronic charge
         self.spin = 0 # Spin multiplicity
         self.last_calculation = None
+        
+        if bond_map is None:
+            self.bond_map = self._buildBondMap()
 
         if mutable_bonds is None:
             self._mutable_bonds = self.zmat.index[1:]
@@ -92,7 +101,8 @@ class Polymorph:
 
         if mutable_dihedrals is None:
             self._mutable_dihedrals = self.zmat.index[3:]
-            
+
+           
     def __str__(self):
         text = f"{self.name}, ID: {self.id}"
         return text
@@ -105,8 +115,20 @@ class Polymorph:
                 'dihedrals' : self.zmat.loc[self._mutable_dihedrals,'dihedral']}
 
     @property
-    def bondpairs(self):
-        return zip(self.zmat.index[1:], self.zmat.loc[1:,'b'])
+    def bond_atoms(self):
+        return self.zmat.iloc[1:].loc[:,'b']
+    
+    @property
+    def angle_atoms(self):
+        angles_df = self.zmat.iloc[2:].loc[:,['b','a']].sort_index()
+        angles_df = angles_df.rename(columns={'b':'B', 'a':'C'}).rename_axis("A", axis="columns")
+        return angles_df
+    
+    @property
+    def dihedral_atoms(self):
+        dihedrals_df = self.zmat.iloc[3:].loc[:,['b','a','d']].sort_index()
+        dihedrals_df = dihedrals_df.rename(columns={'b':'B', 'a':'C', 'd':'D'}).rename_axis("A", axis="columns")
+        return dihedrals_df
     
     @property
     def structure(self):
@@ -117,7 +139,7 @@ class Polymorph:
         """ Geometry in cartesian coordinates without any virtual atoms """
         structure = self.zmat.get_cartesian()
         virtual_atoms = structure['atom'] == 'X'
-        return structure[~virtual_atoms]
+        return structure[~virtual_atoms].sort_index()
     
     @property
     def total_energy(self):
@@ -145,6 +167,26 @@ class Polymorph:
     @property
     def zmat_string(self):
         return self.zmat.to_zmat(upper_triangle=False)
+
+    # Private / internal functions ----------------------------------------------------------------------------------- #
+
+    def _buildBondMap(self):
+        ase_atoms = self.real_structure.get_ase_atoms()
+        cutoffs = ase.neighborlist.natural_cutoffs(ase_atoms)
+        neighbor_list = ase.neighborlist.neighbor_list('ij', ase_atoms, cutoffs)
+        ase_pairs = np.array(neighbor_list).transpose()
+        
+        bond_map = defaultdict(set)
+        for i, j in ase_pairs:
+            bond_map[i].add(j)
+            bond_map[j].add(i)
+
+        bond_atoms = self.bond_atoms
+        for a,b in zip(bond_atoms.index, bond_atoms):
+            bond_map[a].add(b)
+            bond_map[b].add(a)
+                
+        return bond_map
 
     # Loading/Saving ------------------------------------------------------------------------------------------------- #
     def saveStructure(self, filename):
@@ -205,24 +247,30 @@ class Polymorph:
 
         for bond_index in self._mutable_bonds:
             if np.random.rand() < self.crossover_probability:
-                genomes_altered = True
                 own_bondlength = self.zmat.loc[bond_index, 'bond']
-                own_zmatrix.safe_loc[bond_index, 'bond'] = partner.zmat.loc[bond_index, 'bond']
-                partner_zmatrix.safe_loc[bond_index, 'bond'] = own_bondlength
-
+                partner_bondlength = partner.zmat.loc[bond_index, 'bond']
+                if not np.isclose(own_bondlength, partner_bondlength):
+                    own_zmatrix.safe_loc[bond_index, 'bond'] = partner_bondlength
+                    partner_zmatrix.safe_loc[bond_index, 'bond'] = own_bondlength
+                    genomes_altered = True
+                
         for angle_index in self._mutable_angles:
             if np.random.rand() < self.crossover_probability:
-                genomes_altered = True
                 own_angle = self.zmat.loc[angle_index, 'angle']
-                own_zmatrix.safe_loc[angle_index, 'angle'] = partner.zmat.loc[angle_index, 'angle']
-                partner_zmatrix.safe_loc[angle_index, 'angle'] = own_angle
+                partner_angle = partner.zmat.loc[angle_index, 'angle']
+                if not np.isclose(own_angle, partner_angle):
+                    own_zmatrix.safe_loc[angle_index, 'angle'] = partner_angle
+                    partner_zmatrix.safe_loc[angle_index, 'angle'] = own_angle
+                    genomes_altered = True
 
         for dihedral_index in self._mutable_dihedrals:
             if np.random.rand() < self.crossover_probability:
-                genomes_altered = True
                 own_dihedral = self.zmat.loc[dihedral_index, 'dihedral']
-                own_zmatrix.safe_loc[dihedral_index, 'dihedral'] = partner.zmat.loc[dihedral_index, 'dihedral']
-                partner_zmatrix.safe_loc[dihedral_index, 'dihedral'] = own_dihedral
+                partner_dihedral =  partner.zmat.loc[dihedral_index, 'dihedral']
+                if not np.isclose(own_dihedral, partner_dihedral):
+                    own_zmatrix.safe_loc[dihedral_index, 'dihedral'] = partner_dihedral
+                    partner_zmatrix.safe_loc[dihedral_index, 'dihedral'] = own_dihedral
+                    genomes_altered = True
                 
         if genomes_altered:
             success_self = self.applyMutation(own_zmatrix, validate_updates)
@@ -314,6 +362,9 @@ class Polymorph:
         self.mutateAngles(verbose=verbose)
         self.mutateDihedrals(verbose=verbose)
 
+
+    # Geometry Optimization ------------------------------------------------------------------------------------------ #
+    
 
     # SCF Calculations ----------------------------------------------------------------------------------------------- #
     def setupGeometryForCalculation(self, basis=None, charge=None, spin=None, verbosity=None):
@@ -447,22 +498,37 @@ class Polymorph:
             self.properties[Polymorph.IONIZATION_ENERGY] = np.nan
             return None
 
-
     # Visualization -------------------------------------------------------------------------------------------------
     
     def visualize(self):
         atoms = self.structure.get_ase_atoms()
         ase.visualize.view(atoms, name=f"ID_{self.id}_")
     
-    
+    # Misc ----------------------------------------------------------------------------------------------------------
+    def selectDihedralsByType(self, type='proper'):
+        valid_dihedral_idxs = self.zmat.index[3:]
+        proper_dihedrals = []
+        
+        for a in valid_dihedral_idxs:
+            b,c,d = list(self.zmat.loc[a,['b', 'a', 'd']])
+            if b in self.bond_map[a] and c in self.bond_map[b] and d in self.bond_map[c]:
+               proper_dihedrals.append(a)
+               
+        if type == 'proper':
+            return pd.Int64Index(proper_dihedrals)
+        elif type == 'improper':
+            return valid_dihedral_idxs.drop(proper_dihedrals)
 
 
 if __name__ == "__main__":
     import chemcoord as cc
     from Mutators import PlaceboMutator
-    structure = cc.Cartesian.read_xyz("../molecules/dihedral_tm1.xyz")
+    structure = cc.Cartesian.read_xyz("../molecules/CF3-CH3.xyz")
     zmat = structure.get_zmat()
     bond_mutator = PlaceboMutator('bond')
     angle_mutator = PlaceboMutator('angle')
     dihedral_mutator = PlaceboMutator('dihedral')
     pm = Polymorph(zmat, bond_mutator, angle_mutator, dihedral_mutator)
+    
+    #proper_dihedrals = pm.selectDihedralsByType()
+    

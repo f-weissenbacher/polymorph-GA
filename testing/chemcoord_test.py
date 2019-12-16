@@ -9,7 +9,7 @@ cc.settings['defaults']['viewer'] = 'ase-gui'
 
 molecule = cc.Cartesian.read_xyz(join(molecules_dir,"dihedral_tm1.xyz"))
 
-zmat = molecule.give_zmat()
+zmat = molecule.get_zmat()
 
-zmat.safe_loc[0,'angle'] = 180
+#zmat.safe_loc[0,'angle'] = 180
 

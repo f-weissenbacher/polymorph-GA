@@ -15,6 +15,8 @@ import shutil
 import os
 import pickle
 
+from matplotlib.ticker import MaxNLocator
+
 import configparser
 
 pybel.ipython_3d = True
@@ -190,16 +192,25 @@ class GeneticAlgorithm:
         self.removePolymorphs(polymorphs_to_drop)
             
     
-    def renderCurrentGeneration(self, shader='basic'):
+    def renderGeneration(self, generation_number=-1, shader='lambert'):
         """ Displays geometries of all polymorphs in the current generation """
+        if generation_number > self.current_generation_number:
+            raise ValueError(f"Generation {generation_number} does not exist (yet)")
+
+        generation = self.population_timeline[generation_number]
         renders = (imolecule.draw(p.gzmat_string, format='gzmat', size=(200, 150),
                                   shader=shader, display_html=False, resizeable=False) \
-                   for p in self.current_generation.values())
+                   for p in generation.values())
         columns = ('<div class="col-xs-6 col-sm-3">{}</div>'.format(r) for r in renders)
         display(HTML('<div class="row">{}</div>'.format("".join(columns))))
         
-    def viewCurrentGeneration(self):
-        for p in self.current_generation.values():
+    def viewGeneration(self, generation_number=-1):
+        if generation_number > self.current_generation_number:
+            raise ValueError(f"Generation {generation_number} does not exist (yet)")
+        
+        generation = self.population_timeline[generation_number]
+        
+        for p in generation.values():
             p.visualize()
     
     
@@ -257,7 +268,7 @@ class GeneticAlgorithm:
 
 
     #### Mate polymorphs
-    def generateOffsprings(self, verbose=False):
+    def generateOffsprings(self, mode='random', verbose=False):
         n_pairs = int(np.floor(len(self.current_generation) / 2))
         pair_indices = np.random.permutation(list(self.current_generation.keys()))
         pair_indices = pair_indices[:2 * n_pairs]
@@ -348,13 +359,46 @@ class GeneticAlgorithm:
         values = self.collectTimelineFor(property_key)
         
         if ax is None:
-            ax = plt.gca()
+            fig = plt.figure()
+            ax = fig.add_subplot(111)
             
         image = ax.imshow(values[:,start_with:], cmap=cmap)
         plt.colorbar(image, ax=ax)
+        ax.set_title(f"Evolution of {property_key}")
+        ax.set_xlabel("Number of generations")
+        ax.set_ylabel("Polymorphs ranked by fitness")
+        ax.xaxis.set_major_locator(MaxNLocator(integer=True))
         
-
+    def analyzeTimeline(self, property_key=None, ax=None, yscale='linear'):
+        if property_key is None:
+            property_key = self.fitness_property
+            
+        values = self.collectTimelineFor(property_key)
         
+        mid_index = int(np.floor(self.generation_size/2))
+        
+        mean_value = np.mean(values, axis=0)
+        median_value = values[mid_index,:]
+        max_value = np.max(values, axis=0)
+        min_value = np.min(values, axis=0)
+        
+        if ax is None:
+            fig = plt.figure()
+            ax = fig.add_subplot(111)
+            
+        ax.set_yscale(yscale)
+        ax.set_title(f"Time evolution for property '{property_key}'")
+        ax.set_xlabel("Generation number")
+        ax.set_ylabel(f"{property_key} / {Polymorph.DATA_UNITS[property_key]}")
+        # Plot timeline for statistical quantities
+        ax.plot(mean_value, 'C0', label="average")
+        ax.plot(median_value, 'C4:', label="median")
+        ax.plot(max_value, 'C3', label="max")
+        ax.plot(min_value, 'C2', label="min")
+        ax.legend()
+        ax.xaxis.set_major_locator(MaxNLocator(integer=True))
+        
+        return ax
         
   
 if __name__ is "__main__":
@@ -363,7 +407,7 @@ if __name__ is "__main__":
     import matplotlib.pyplot as plt
     molecules_dir = os.path.abspath(join(os.path.dirname(__file__),"../molecules"))
     testing_dir = os.path.abspath(join(os.path.dirname(__file__),"../testing"))
-    structure_filepath = join(molecules_dir, "testmolecule_1.xyz")
+    structure_filepath = join(molecules_dir, "CF3-CH3.xyz")
     
     os.chdir(testing_dir)
     mutation_rate = 0.05
@@ -371,12 +415,15 @@ if __name__ is "__main__":
     factory = PolymorphFactory(structure_filepath, mutation_rate, crossover_rate)
     factory.freezeBonds('all')
     factory.freezeAngles('all')
+    factory.freezeDihedrals('all-improper')
     ga = GeneticAlgorithm(factory, generation_size=20, default_discard_mode='fermi')
     ga.fillGeneration()
-
-    #ga.doGenerationStep('fermi')
     
-    ga.doMultipleGenerationSteps(50, verbose=True)
+    ga.doMultipleGenerationSteps(20, verbose=True)
     
     ga.plotTimeline(Polymorph.TOTAL_ENERGY)
+    
+    ga.analyzeTimeline(yscale='linear')
+    
+    bp = ga.factory.base_polymorph
     

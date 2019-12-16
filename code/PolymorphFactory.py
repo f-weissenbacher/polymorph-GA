@@ -144,6 +144,10 @@ class PolymorphFactory:
         if dihedrals_to_freeze == 'all':
             self._mutable_dihedrals_idxs = self._mutable_dihedrals_idxs.drop(self._mutable_dihedrals_idxs)
         
+        elif dihedrals_to_freeze == 'all-improper':
+            proper_dihedrals_idxs = self.base_polymorph.selectDihedralsByType('proper')
+            self._mutable_dihedrals_idxs = proper_dihedrals_idxs
+        
         elif isinstance(dihedrals_to_freeze, Collection):
             for dihedral in dihedrals_to_freeze:
                 if isinstance(dihedral, Collection) and len(dihedral) == 4:  # bond == Pair of atom indices
@@ -166,6 +170,7 @@ class PolymorphFactory:
     
     # Generation of polymorphs -----------------------------------------------------
     def generateRandomPolymorph(self, valid_structure_only=True, n_max_restarts=2):
+        """ Generates a random polymorph by running full range mutations on the base polymorph """
         
         for k in range(n_max_restarts):
             zmat = self.zmat_base.copy()
@@ -207,8 +212,7 @@ class PolymorphFactory:
                                  self._mutable_bonds_idxs, self._mutable_angles_idxs, self._mutable_dihedrals_idxs,
                                  self.crossover_rate, name=self.polymer_name)
         else:
-            print(
-                f"Warning: Unable to generate random Polymorph. Reached maximum number of restarts ({n_max_restarts})")
+            print(f"Warning: Unable to generate random Polymorph. Reached maximum number of restarts ({n_max_restarts})")
             return None
     
     def _createBasePolymorph(self):
