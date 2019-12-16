@@ -268,17 +268,11 @@ class GeneticAlgorithm:
 
 
     #### Mate polymorphs
-    def generateOffsprings(self, mode='random', verbose=False):
+    def generateOffsprings(self, verbose=False):
         n_pairs = int(np.floor(len(self.current_generation) / 2))
-        
-        pair_indices = []
-        if mode == 'random':
-            pair_indices = np.random.permutation(list(self.current_generation.keys()))
-            pair_indices = pair_indices[:2 * n_pairs]
-            pair_indices = np.reshape(pair_indices, (n_pairs, 2))
-            
-        elif mode == 'roulette':
-            pass
+        pair_indices = np.random.permutation(list(self.current_generation.keys()))
+        pair_indices = pair_indices[:2 * n_pairs]
+        pair_indices = np.reshape(pair_indices, (n_pairs, 2))
        
         if verbose:
             print("Generating offspring ...")
