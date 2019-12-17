@@ -5,8 +5,8 @@ import numpy as np
 from chemcoord import Zmat
 
 
-def fermiDistribution(x, mu, sigma):
-    return 1 / (1 + np.exp((x - mu)/sigma))
+def fermiDistribution(x, mu, sigma, sign=1.0):
+    return 1 / (1 + np.exp(sign * (x - mu)/sigma))
 
 
 def minimalDistanceThreshold(element_a, element_b, threshold_factor=0.8):
