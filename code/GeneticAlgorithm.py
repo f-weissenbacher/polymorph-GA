@@ -352,7 +352,8 @@ class GeneticAlgorithm:
 
         return assignMatingPairs(n_pairs, mating_pool)
     
-    def generateOffsprings(self, n_offsprings, mode='random', mating_pool_size=None, verbose=False):
+    def generateOffsprings(self, n_offsprings, mode='random', mating_pool_size=None, validate_children=True,
+                           verbose=False):
         """ Generates offsprings by mating polymorphs of the current generation with a process defined by
         argument 'mode'
         
@@ -389,7 +390,11 @@ class GeneticAlgorithm:
         for ind_a, ind_b in mating_pairs:
             partner_a = self.current_generation[ind_a]
             partner_b = self.current_generation[ind_b]
-            child = partner_a.mateWith(partner_b, verbose=verbose)
+            # Mate partners, only accept if child is valid
+            child = None
+            while child is None:
+                child = partner_a.mateWith(partner_b, validate_child=validate_children, verbose=verbose)
+                
             child_polymorphs[child.id] = child
             children_properties_dict[child.id] = child.properties
     
@@ -478,6 +483,8 @@ class GeneticAlgorithm:
             
         for k in range(n_steps):
             self.doGenerationStep(matchmaking_mode, discard_mode)
+            
+        self.evaluateGeneration()
 
     #### Visualizing a generation ------------------------------------------------------------------------------------ #
 
@@ -501,6 +508,13 @@ class GeneticAlgorithm:
     
         for p in generation.values():
             p.visualize()
+            
+    def showBestPolymorph(self, generation_number=-1):
+        best_id = self.fitnessRanking(generation_number).index[0]
+        best_pm = self.current_generation[best_id]
+        best_pm.visualize()
+        
+        
   
     #### Timeline: Analysis and Visualization ------------------------------------------------------------------------ #
     def collectTimelineFor(self, property_key):
@@ -574,7 +588,7 @@ if __name__ is "__main__":
     import matplotlib.pyplot as plt
     molecules_dir = os.path.abspath(join(os.path.dirname(__file__),"../molecules"))
     testing_dir = os.path.abspath(join(os.path.dirname(__file__),"../testing"))
-    structure_filepath = join(molecules_dir, "testmolecule_1.xyz")
+    structure_filepath = join(molecules_dir, "testmolecule_3.xyz")
     
     os.chdir(testing_dir)
     mutation_rate = 0.05
@@ -588,7 +602,7 @@ if __name__ is "__main__":
     ga.fillGeneration()
     
     ga.doGenerationStep()
-    ga.doMultipleGenerationSteps(10, verbose=True)
+    ga.doMultipleGenerationSteps(20, verbose=True)
     ga.plotTimeline(Polymorph.TOTAL_ENERGY)
     ga.analyzeTimeline(yscale='linear')
     #bp = ga.factory.base_polymorph

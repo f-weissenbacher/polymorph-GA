@@ -200,7 +200,7 @@ class Polymorph:
         
 
     # Mating and Crossover ------------------------------------------------------------------------------------------- #
-    def mateWith(self, partner, verbose=False):
+    def mateWith(self, partner, validate_child=True, verbose=False):
         """ Creates an offspring polymorph by mating two polymorphs
         Both involved polymorphs are assumed to share the same type of genome """
 
@@ -223,6 +223,11 @@ class Polymorph:
       
         name = f"Child of {self.id} & {partner.id}"
         generation_number = max(self.generation_number, partner.generation_number) + 1
+      
+        if validate_child:
+            if not checkAtomDistances(new_zmat):
+                print("Resulting child was not valid!")
+                return None
       
         new_polymorph = Polymorph(new_zmat, self.bond_mutator, self.angle_mutator, self.dihedral_mutator,
                                   self._mutable_bonds, self._mutable_angles, self._mutable_dihedrals,
