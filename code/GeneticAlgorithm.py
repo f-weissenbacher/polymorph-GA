@@ -5,7 +5,7 @@ import Polymorph
 from Polymorph import Polymorph
 from PolymorphFactory import PolymorphFactory
 
-from Mutators import FullRangeMutator, IncrementalMutator, PlaceboMutator
+from Mutators import FullRangeMutator, IncrementalMutator, PlaceboMutator, MultiplicativeMutator
 
 import pandas as pd
 import numpy as np
@@ -16,6 +16,7 @@ import os
 import pickle
 
 from matplotlib.ticker import MaxNLocator
+import matplotlib.pyplot as plt
 
 import configparser
 
@@ -239,25 +240,12 @@ class GeneticAlgorithm:
         for p in self.current_generation.values():
             if p.needs_evaluation:
                 print(f"Polymorph {p.id} was mutated, needs evaluation")
-                p.runHartreeFock(run_dir=self.pyscf_calc_dir)
+                p.evaluate(self.fitness_property)
                 # Update Properties
                 self.current_properties.loc[[p.id]] = pd.DataFrame.from_dict({p.id: p.properties}, orient='index', dtype=float)
             else:
                 print(f"Polymorph {p.id} unchanged")
 
-    def evaluateIonizationEnergies(self):
-        for p in self.current_generation.values():
-            if p.properties[Polymorph.IONIZATION_ENERGY] in [np.nan, None]:
-                p.calculateIonizationEnergy()
-                
-        self.collectGenerationProperties()
-
-    def evaluateElectronAffinities(self):
-        for p in self.current_generation.values():
-            if p.properties[Polymorph.ELECTRON_AFFINITY] in [np.nan, None]:
-                p.calculateElectronAffinity()
-    
-        self.collectGenerationProperties()
 
     #### Polymorph generation / Initialization of a generation ---------------------------------------------------------
     # TODO: Make sure that enough polymorphs are generated
@@ -317,18 +305,22 @@ class GeneticAlgorithm:
         controls the slope of the distribution function. The sign in the exponent depends on whether the fitness value
         is to be maximized or minimized.
         """
-        # Limit size of mating pool
-        mating_pool_size = min(mating_pool_size, self.generation_size)
         
-        fitness_values = self.fitnessRanking()
-        min_value = np.nanmin(fitness_values)
-        max_value = np.nanmax(fitness_values)
-        # cutoff_value = 0.5 * (fitness_values.iloc[-(n_to_drop+1)] + fitness_values.iloc[-n_to_drop])
-        mean_fitness = np.nanmean(fitness_values)
+        fitness_ranking = self.fitnessRanking()
+        # Remove polymorphs with fitness = nan
+        fitness_ranking = fitness_ranking[~np.isnan(fitness_ranking)]
+
+        # Limit size of mating pool
+        mating_pool_size = min(mating_pool_size, len(fitness_ranking))
+
+        # Determine range of values
+        min_value = np.nanmin(fitness_ranking)
+        max_value = np.nanmax(fitness_ranking)
+        mean_fitness = np.nanmean(fitness_ranking)
 
         sigma = (max_value - min_value) * sigma
 
-        polymorph_list = list(self.current_generation.keys())
+        polymorph_list = list(fitness_ranking.index)
         mating_pool = []
         
         if self.fitness_sort_ascending:
@@ -341,7 +333,7 @@ class GeneticAlgorithm:
 
         while len(mating_pool) < mating_pool_size:
             for pm_id in polymorph_list:
-                occupation_chance = fermiDistribution(fitness_values.loc[pm_id], mean_fitness, sigma, sign)
+                occupation_chance = fermiDistribution(fitness_ranking.loc[pm_id], mean_fitness, sigma, sign)
                 if np.random.rand() < occupation_chance:
                     # Add to mating pool
                     mating_pool.append(pm_id)
@@ -427,7 +419,7 @@ class GeneticAlgorithm:
       
       
     #### Algorithm execution ----------------------------------------------------------------------------------------- #
-    def doGenerationStep(self, matchmaking_mode='default', discard_mode='default', verbose=True):
+    def doGenerationStep(self, matchmaking_mode='default', discard_mode='default', verbose=False):
         if discard_mode == 'default':
             discard_mode = self.discard_mode
             
@@ -482,7 +474,7 @@ class GeneticAlgorithm:
             matchmaking_mode = self.matchmaking_mode
             
         for k in range(n_steps):
-            self.doGenerationStep(matchmaking_mode, discard_mode)
+            self.doGenerationStep(matchmaking_mode, discard_mode, verbose=verbose)
             
         self.evaluateGeneration()
 
@@ -493,7 +485,11 @@ class GeneticAlgorithm:
         if generation_number > self.current_generation_number:
             raise ValueError(f"Generation {generation_number} does not exist (yet)")
     
-        generation = self.population_timeline[generation_number]
+        if generation_number == -1:
+            generation = self.current_generation
+        else:
+            generation = self.population_timeline[generation_number]
+            
         renders = (imolecule.draw(p.gzmat_string, format='gzmat', size=(200, 150),
                                   shader=shader, display_html=False, resizeable=False) \
                    for p in generation.values())
@@ -517,6 +513,16 @@ class GeneticAlgorithm:
         
   
     #### Timeline: Analysis and Visualization ------------------------------------------------------------------------ #
+    
+    def findPolymorphInTimeline(self, polymorph_id):
+        occurrences = dict()
+        for gen_number, generation in enumerate(self.population_timeline):
+            if polymorph_id in generation.keys():
+                occurrences[gen_number] = generation[polymorph_id]
+    
+        return occurrences
+    
+    
     def collectTimelineFor(self, property_key):
         if property_key not in Polymorph.DATA_FIELDS:
             raise ValueError("Invalid data field / property type.")
@@ -586,24 +592,31 @@ if __name__ is "__main__":
     import os
     from os.path import join
     import matplotlib.pyplot as plt
+    from Utilities import deleteTempfiles
     molecules_dir = os.path.abspath(join(os.path.dirname(__file__),"../molecules"))
     testing_dir = os.path.abspath(join(os.path.dirname(__file__),"../testing"))
-    structure_filepath = join(molecules_dir, "testmolecule_3.xyz")
+    structure_filepath = join(molecules_dir, "ethane.xyz")
     
     os.chdir(testing_dir)
     mutation_rate = 0.05
-    crossover_rate = 0.0
-    factory = PolymorphFactory(structure_filepath, mutation_rate, crossover_rate)
+    crossover_rate = 0.01
+    
+    #bond_mutator = MultiplicativeMutator('bond',[0.8,1.2],[0.8,1.2], False, mutation_rate)
+    
+    factory = PolymorphFactory(structure_filepath, mutation_rate, crossover_rate, bond_mutator=None)
     factory.freezeBonds('all')
-    factory.freezeAngles('all')
-    factory.freezeDihedrals('all-improper')
-    ga = GeneticAlgorithm(factory, generation_size=10, discard_mode='least-fittest',
-                          matchmaking_mode='roulette', fitness_goal='minimize')
+    #factory.freezeAngles('all')
+    #factory.freezeDihedrals('all')
+    ga = GeneticAlgorithm(factory, generation_size=15, discard_mode='least-fittest',
+                          fitness_property=Polymorph.TOTAL_ENERGY, fitness_goal='minimize',
+                          matchmaking_mode='roulette')
     ga.fillGeneration()
     
     ga.doGenerationStep()
-    ga.doMultipleGenerationSteps(20, verbose=True)
+    ga.doMultipleGenerationSteps(30, verbose=True)
     ga.plotTimeline(Polymorph.TOTAL_ENERGY)
     ga.analyzeTimeline(yscale='linear')
     #bp = ga.factory.base_polymorph
+    
+    deleteTempfiles(testing_dir)
     

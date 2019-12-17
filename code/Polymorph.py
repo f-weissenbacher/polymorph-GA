@@ -113,23 +113,7 @@ class Polymorph:
         return {'bondlengths' : self.zmat.loc[self._mutable_bonds,'bond'],
                 'angles' : self.zmat.loc[self._mutable_angles, 'angle'],
                 'dihedrals' : self.zmat.loc[self._mutable_dihedrals,'dihedral']}
-
-    @property
-    def bond_atoms(self):
-        return self.zmat.iloc[1:].loc[:,'b']
-    
-    @property
-    def angle_atoms(self):
-        angles_df = self.zmat.iloc[2:].loc[:,['b','a']].sort_index()
-        angles_df = angles_df.rename(columns={'b':'B', 'a':'C'}).rename_axis("A", axis="columns")
-        return angles_df
-    
-    @property
-    def dihedral_atoms(self):
-        dihedrals_df = self.zmat.iloc[3:].loc[:,['b','a','d']].sort_index()
-        dihedrals_df = dihedrals_df.rename(columns={'b':'B', 'a':'C', 'd':'D'}).rename_axis("A", axis="columns")
-        return dihedrals_df
-    
+   
     @property
     def structure(self):
         return self.zmat.get_cartesian().sort_index()
@@ -167,6 +151,34 @@ class Polymorph:
     @property
     def zmat_string(self):
         return self.zmat.to_zmat(upper_triangle=False)
+    
+    # Getters -------------------------------------------------------------------------------------------------------- #
+    def bond_atoms(self, mutable_only=False):
+        if mutable_only:
+            return self.zmat.loc[self._mutable_bonds, 'b']
+        else:
+            return self.zmat.iloc[1:].loc[:, 'b']
+
+    def angle_atoms(self, mutable_only=False):
+        if mutable_only:
+            angles_df = self.zmat.loc[self._mutable_angles]
+        else:
+            angles_df = self.zmat.iloc[2:]
+        # Sort values
+        angles_df = angles_df.loc[:, ['b', 'a']].sort_index()
+        angles_df = angles_df.rename(columns={'b': 'B', 'a': 'C'}).rename_axis("A", axis="columns")
+        return angles_df
+
+    @property
+    def dihedral_atoms(self, mutable_only=False):
+        if mutable_only:
+            dihedrals_df = self.zmat.loc[self._mutable_dihedrals]
+        else:
+            dihedrals_df = self.zmat.iloc[3:]
+        # Sort values and rename columns
+        dihedrals_df = dihedrals_df.loc[:, ['b', 'a', 'd']].sort_index()
+        dihedrals_df = dihedrals_df.rename(columns={'b': 'B', 'a': 'C', 'd': 'D'}).rename_axis("A", axis="columns")
+        return dihedrals_df
 
     # Private / internal functions ----------------------------------------------------------------------------------- #
 
@@ -181,7 +193,7 @@ class Polymorph:
             bond_map[i].add(j)
             bond_map[j].add(i)
 
-        bond_atoms = self.bond_atoms
+        bond_atoms = self.bond_atoms(mutable_only=False)
         for a,b in zip(bond_atoms.index, bond_atoms):
             bond_map[a].add(b)
             bond_map[b].add(a)
@@ -366,10 +378,7 @@ class Polymorph:
         self.mutateBonds(verbose=verbose)
         self.mutateAngles(verbose=verbose)
         self.mutateDihedrals(verbose=verbose)
-
-
-    # Geometry Optimization ------------------------------------------------------------------------------------------ #
-    
+   
 
     # SCF Calculations ----------------------------------------------------------------------------------------------- #
     def setupGeometryForCalculation(self, basis=None, charge=None, spin=None, verbosity=None):
@@ -381,7 +390,6 @@ class Polymorph:
             charge = self.charge
         if spin is None:
             spin = self.spin
-            
            
         mol = pyscf.gto.Mole()
         mol.atom = self.real_structure.to_string(index=False, header=False)
@@ -428,8 +436,6 @@ class Polymorph:
             self.needs_evaluation = False
         else:
             print(f"Polymorph {self.id}: Hartree-Fock calculation did not converge!")
-        
-
         
     def calculateElectronAffinity(self, anion_spin=None, run_dir=None):
         if anion_spin is None:
@@ -503,8 +509,17 @@ class Polymorph:
             self.properties[Polymorph.IONIZATION_ENERGY] = np.nan
             return None
 
-    # Visualization -------------------------------------------------------------------------------------------------
+    def evaluate(self, fitness_property=TOTAL_ENERGY):
+        """ Determines the fitness of the polymorph by running the corresponding SCF calculations """
+
+        if fitness_property == Polymorph.IONIZATION_ENERGY:
+            self.calculateIonizationEnergy()
+        elif fitness_property == Polymorph.ELECTRON_AFFINITY:
+            self.calculateElectronAffinity()
+        else:
+            self.runHartreeFock()
     
+    # Visualization -------------------------------------------------------------------------------------------------
     def visualize(self):
         atoms = self.structure.get_ase_atoms()
         ase.visualize.view(atoms, name=f"ID_{self.id}_")

@@ -1,6 +1,8 @@
 import ase
 from ase import data
 import numpy as np
+import glob
+import os
 
 from chemcoord import Zmat
 
@@ -34,3 +36,10 @@ def checkAtomDistances(zmatrix: Zmat, threshold_factor=0.8):
     
     else:  # All distances are valid
         return True
+    
+    
+def deleteTempfiles(folder):
+    tmp_files = [f for f in glob.glob(os.path.join(folder, "tmp*"))]
+    
+    for f in tmp_files:
+        os.remove(f)

@@ -74,6 +74,9 @@ class PolymorphFactory:
             
         Polymorph.resetIdCounter()
         self._createBasePolymorph()
+        
+        print("Running DFT calculation for base polymorph")
+        self.base_polymorph.evaluate()
     
     @property
     def mutable_bonds(self):
@@ -163,9 +166,9 @@ class PolymorphFactory:
     
     def setupDefaultMutators(self):
         self.bond_mutator = PlaceboMutator('bond')
-        self.angle_mutator = IncrementalMutator('angle', [0, 180], [-30, 30],
+        self.angle_mutator = IncrementalMutator('angle', [0, 180], [-60, 60],
                                                 gene_is_periodic=False, mutation_rate=self.mutation_rate)
-        self.dihedral_mutator = IncrementalMutator('dihedral', [-180, 180], [-30, 30],
+        self.dihedral_mutator = IncrementalMutator('dihedral', [-180, 180], [-60, 60],
                                                    gene_is_periodic=True, mutation_rate=self.mutation_rate)
     
     # Generation of polymorphs -----------------------------------------------------
