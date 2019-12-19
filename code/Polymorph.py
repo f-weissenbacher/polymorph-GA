@@ -220,7 +220,9 @@ class Polymorph:
         bond_mismatch = np.abs((own_genome['bondlengths'] - partner_genome['bondlengths']) / \
                                (own_genome['bondlengths'] + partner_genome['bondlengths']))
         angles_mismatch = np.abs(own_genome['angles'] - partner_genome['angles'])
-        dihedrals_mismatch = np.mod(np.abs(own_genome['dihedrals'] - partner_genome['dihedrals']), 360.0)  # FIXME: as of now, this does not give the correct result
+        dihedrals_mismatch = np.abs(own_genome['dihedrals'] - partner_genome['dihedrals'])
+        L360 = dihedrals_mismatch > 180
+        dihedrals_mismatch[L360] = 360 - dihedrals_mismatch[L360]
         
         if comparison_mode == 'average':
             return np.mean(bond_mismatch), np.mean(angles_mismatch), np.mean(dihedrals_mismatch)

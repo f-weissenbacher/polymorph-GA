@@ -289,8 +289,12 @@ class GeneticAlgorithm:
                 for pm2_id in family:
                     pm2 = self.current_generation[pm2_id]
                     mismatch = pm1.calculateGenomeDifference(pm2, comparison_mode)
-                    if mismatch[0] < bonds_eps and mismatch[1] < angles_eps and mismatch[2] < dihedrals_eps:
-                        family.append(pm1)
+                    bonds_match = mismatch[0] < bonds_eps or np.isnan(mismatch[0])
+                    angles_match = mismatch[1] < angles_eps or np.isnan(mismatch[1])
+                    dihedrals_match = mismatch[2] < dihedrals_eps or np.isnan(mismatch[2])
+                    # Check if pm1 is a close relative of pm2. If yes, assign pm1 to the corresponding family
+                    if bonds_match and angles_match and dihedrals_match:
+                        family.append(pm1_id)
                         pm1_found_family = True
                         break
                 if pm1_found_family:
