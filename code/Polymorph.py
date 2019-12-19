@@ -61,14 +61,14 @@ class Polymorph:
     # Constructor and other __functions__ ---------------------------------------------------------------------------- #
     def __init__(self, zmatrix, bond_mutator, angle_mutator, dihedral_mutator,
                  mutable_bonds=None, mutable_angles=None, mutable_dihedrals=None,
-                 crossover_rate=1e-3, bond_map=None, name="", generation_number=-1, custom_id=None):
+                 crossover_rate=1e-3, bond_map=None, name="", custom_id=None):
 
         self.name = name
         if custom_id is None:
             self.id = Polymorph._generate_id()
         else:
             self.id = custom_id
-        self.generation_number = generation_number
+
         self.bond_mutator = bond_mutator
         self.angle_mutator = angle_mutator
         self.dihedral_mutator = dihedral_mutator
@@ -212,6 +212,23 @@ class Polymorph:
         
 
     # Mating and Crossover ------------------------------------------------------------------------------------------- #
+    
+    def calculateGenomeDifference(self, partner, comparison_mode='average'):
+        own_genome = self.genome
+        partner_genome = partner.genome
+        
+        bond_mismatch = np.abs((own_genome['bondlengths'] - partner_genome['bondlengths']) / \
+                               (own_genome['bondlengths'] + partner_genome['bondlengths']))
+        angles_mismatch = np.abs(own_genome['angles'] - partner_genome['angles'])
+        dihedrals_mismatch = np.mod(np.abs(own_genome['dihedrals'] - partner_genome['dihedrals']), 360.0)  # FIXME: as of now, this does not give the correct result
+        
+        if comparison_mode == 'average':
+            return np.mean(bond_mismatch), np.mean(angles_mismatch), np.mean(dihedrals_mismatch)
+        elif comparison_mode == 'maximum':
+            return np.max(bond_mismatch), np.max(angles_mismatch), np.max(dihedrals_mismatch)
+        else:
+            return ValueError("Invalid comparison mode. Valid options: 'average', 'maximum'")
+    
     def mateWith(self, partner, validate_child=True, verbose=False):
         """ Creates an offspring polymorph by mating two polymorphs
         Both involved polymorphs are assumed to share the same type of genome """
@@ -234,16 +251,16 @@ class Polymorph:
                 new_zmat.safe_loc[dihedral_index, 'dihedral'] = partner.zmat.loc[dihedral_index, 'dihedral']
       
         name = f"Child of {self.id} & {partner.id}"
-        generation_number = max(self.generation_number, partner.generation_number) + 1
       
         if validate_child:
             if not checkAtomDistances(new_zmat):
-                print("Resulting child was not valid!")
+                if verbose:
+                    print("Resulting child was not valid!")
                 return None
       
         new_polymorph = Polymorph(new_zmat, self.bond_mutator, self.angle_mutator, self.dihedral_mutator,
                                   self._mutable_bonds, self._mutable_angles, self._mutable_dihedrals,
-                                  self.crossover_probability, name=name, generation_number=generation_number)
+                                  self.crossover_probability, name=name)
         
         if verbose:
             print(f"--> Child polymorph: {new_polymorph.id}")

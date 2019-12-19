@@ -84,7 +84,7 @@ class GeneticAlgorithm:
             self.fitness_sort_ascending = True
         
         self.generation_size = generation_size
-        self.current_generation_number = 0
+        #self.current_generation_number = 0
         self.population_timeline = []
         self.properties_timeline = []
         self.discard_mode = discard_mode
@@ -99,21 +99,36 @@ class GeneticAlgorithm:
         self.work_dir = work_dir
         self.pyscf_calc_dir = os.path.join(work_dir, "pyscf-calculations")
         makeSureDirectoryExists(self.pyscf_calc_dir)
+        
+        self.fillCurrentGeneration()
+        
+    @property
+    def current_generation_number(self):
+        return len(self.population_timeline)
     
 
-    def fitnessRanking(self, generation_number=-1):
+    def fitnessRanking(self, generation_number=None):
         """ Returns a pandas.Series object that contains the fitness value for all polymorphs in the specified
         generation, ranked from fittest to least fittest. Entries are labeled with the corresponding polymorph ID"""
-        if generation_number == -1:
+        if generation_number is None:
             properties = self.current_properties
         else:
             properties = self.properties_timeline[generation_number]
             
         return properties[self.fitness_property].sort_values(ascending=self.fitness_sort_ascending)
+     
+    def firstValueIsFitter(self, value1, value2):
+        if np.isnan(value1):
+            return False
+        if np.isnan(value2):
+            return True
+        if self.fitness_sort_ascending:
+            return value1 < value2
+        else:
+            return value1 > value2
         
     def saveState(self, folder):
         makeSureDirectoryExists(folder)
-        
         factory_filepath = os.path.join(folder, "polymorph_factory.pkl")
         timeline_filepath = os.path.join(folder, "generation_timeline.pkl")
         config_filepath = os.path.join(folder, "settings.config")
@@ -135,7 +150,6 @@ class GeneticAlgorithm:
         with open(timeline_filepath, 'wb') as timeline_file:
             pickle.dump(self.population_timeline, timeline_file)
 
-    
     @classmethod
     def loadState(cls, folder):
         factory_filepath = os.path.join(folder, "polymorph_factory.pkl")
@@ -174,7 +188,6 @@ class GeneticAlgorithm:
             self.current_generation.pop(polymorph_id)
     
         self.current_properties = self.current_properties.drop(polymorphs_to_drop, axis=0)
-
 
     def discardLeastFittest(self, n):
         """" Removes the *n* least fittest polymorphs from the current generation"""
@@ -235,8 +248,8 @@ class GeneticAlgorithm:
             return self.current_properties
     
     
-    def evaluateGeneration(self):
-        print("Evaluating current generation ...")
+    def evaluateCurrentGeneration(self):
+        print(f"Evaluating current generation (# {self.current_generation_number}) ...")
         for p in self.current_generation.values():
             if p.needs_evaluation:
                 print(f"Polymorph {p.id} was mutated, needs evaluation")
@@ -249,7 +262,7 @@ class GeneticAlgorithm:
 
     #### Polymorph generation / Initialization of a generation ---------------------------------------------------------
     # TODO: Make sure that enough polymorphs are generated
-    def fillGeneration(self):
+    def fillCurrentGeneration(self):
         n_existing = len(self.current_generation)
         new_polymorphs_dict = dict()
         for k in range(self.generation_size - n_existing):
@@ -260,6 +273,32 @@ class GeneticAlgorithm:
                 
         new_properties_df = pd.DataFrame.from_dict(new_polymorphs_dict, orient='index', dtype=float)
         self.current_properties = self.current_properties.append(new_properties_df)
+
+    #### Genetic diversity
+    
+    def analyzeGeneticDiversity(self, comparison_mode='average', bonds_eps=1e-2, angles_eps=0.1, dihedrals_eps=0.1):
+        families = []
+        polymorph_ids = list(self.current_generation.keys())
+        
+        families.append([polymorph_ids.pop()])
+        
+        for pm1_id in polymorph_ids:
+            pm1 = self.current_generation[pm1_id]
+            pm1_found_family = False
+            for family in families:
+                for pm2_id in family:
+                    pm2 = self.current_generation[pm2_id]
+                    mismatch = pm1.calculateGenomeDifference(pm2, comparison_mode)
+                    if mismatch[0] < bonds_eps and mismatch[1] < angles_eps and mismatch[2] < dihedrals_eps:
+                        family.append(pm1)
+                        pm1_found_family = True
+                        break
+                if pm1_found_family:
+                    break
+            else:
+                families.append([pm1_id])
+                
+        return families
 
     #### Mating process -----------------------------------------------------------------------------------------------
 
@@ -345,13 +384,14 @@ class GeneticAlgorithm:
         return assignMatingPairs(n_pairs, mating_pool)
     
     def generateOffsprings(self, n_offsprings, mode='random', mating_pool_size=None, validate_children=True,
-                           verbose=False):
+                           prohibit_inbreeding=True, verbose=False):
         """ Generates offsprings by mating polymorphs of the current generation with a process defined by
         argument 'mode'
         
         :param int n_offsprings:
         :param str mode: Sets match making type
         :param int mating_pool_size:
+        :param bool validate_children: When 'True', only valid children are accepted
         :param bool verbose:
         :return dict child_polymorphs:
         :return DataFrame child_properties
@@ -374,7 +414,7 @@ class GeneticAlgorithm:
                              "'inverted-roulette' and 'tournament'")
        
         if verbose:
-            print("Generating offspring ...")
+            print("Generating offsprings ...")
             
         # Create offspring and store in new generation
         children_properties_dict = dict()
@@ -433,19 +473,18 @@ class GeneticAlgorithm:
         self.mutateAll(verbose=verbose)
         self.attemptCrossovers(verbose=verbose)
         # Evaluate changes
-        self.evaluateGeneration()
+        self.evaluateCurrentGeneration()
         print(f"Adding generation {self.current_generation_number} to population_timeline")
         # Save current generation to timeline
         self.population_timeline.append(self.current_generation.copy())
         self.properties_timeline.append(self.current_properties.copy())
         
         # Start next generation
-        self.current_generation_number += 1
-        
+       
         # TODO: Check for convergence at this point
         # Offsprings:
         print("-" * 60)
-        print(f"Creating next generation (Nr. {self.current_generation_number + 1})")
+        print(f"Creating next generation (# {self.current_generation_number})")
         n_offsprings = self.generation_size - self.n_surviving_parents
         child_polymorphs, child_properties = self.generateOffsprings(n_offsprings, mode=matchmaking_mode, verbose=verbose)
         
@@ -476,9 +515,9 @@ class GeneticAlgorithm:
         for k in range(n_steps):
             self.doGenerationStep(matchmaking_mode, discard_mode, verbose=verbose)
             
-        self.evaluateGeneration()
+        self.evaluateCurrentGeneration()
 
-    #### Visualizing a generation ------------------------------------------------------------------------------------ #
+    #### Visualizing / Analyzing a generation ------------------------------------------------------------------------ #
 
     def renderGeneration(self, generation_number=-1, shader='lambert'):
         """ Displays geometries of all polymorphs in the current generation """
@@ -504,15 +543,43 @@ class GeneticAlgorithm:
     
         for p in generation.values():
             p.visualize()
-            
-    def showBestPolymorph(self, generation_number=-1):
+    
+   
+    def findBestPolymorphOfGeneration(self, generation_number=-1):
         best_id = self.fitnessRanking(generation_number).index[0]
-        best_pm = self.current_generation[best_id]
-        best_pm.visualize()
+        return self.population_timeline[generation_number][best_id]
         
+    def showBestPolymorphOfGeneration(self, generation_number=-1):
+        best_pm = self.findBestPolymorphOfGeneration(generation_number)
+        best_pm.visualize()
         
   
     #### Timeline: Analysis and Visualization ------------------------------------------------------------------------ #
+    
+    def findBestPolymorphOfAll(self):
+        if self.fitness_sort_ascending:
+            best_value = np.inf
+        else:
+            best_value = -np.inf
+        
+        best_id = -1
+        best_time = -1
+        for gen_number, generation in enumerate(self.population_timeline):
+            generation_ranking = self.fitnessRanking(gen_number)
+            generation_best = generation_ranking.values[0]
+            if self.firstValueIsFitter(generation_best, best_value):
+                best_id = generation_ranking.index[0]
+                best_time = gen_number
+
+        best_pm =  self.population_timeline[best_time][best_id]
+        print(f"Best overall polymorph: {best_pm} in generation {best_time}.")
+        print(f"Fitness: {self.fitness_property} = {best_pm.properties[self.fitness_property]}" + \
+              f" {Polymorph.DATA_UNITS[self.fitness_property]}")
+        return best_pm
+    
+    def showBestPolymorphOfAll(self):
+        best_pm = self.findBestPolymorphOfAll()
+        best_pm.visualize()
     
     def findPolymorphInTimeline(self, polymorph_id):
         occurrences = dict()
@@ -605,18 +672,20 @@ if __name__ is "__main__":
     
     factory = PolymorphFactory(structure_filepath, mutation_rate, crossover_rate, bond_mutator=None)
     factory.freezeBonds('all')
-    #factory.freezeAngles('all')
+    factory.freezeAngles('all')
     #factory.freezeDihedrals('all')
     ga = GeneticAlgorithm(factory, generation_size=15, discard_mode='least-fittest',
                           fitness_property=Polymorph.TOTAL_ENERGY, fitness_goal='minimize',
                           matchmaking_mode='roulette')
-    ga.fillGeneration()
+    #ga.fillCurrentGeneration()
     
-    ga.doGenerationStep()
-    ga.doMultipleGenerationSteps(30, verbose=True)
-    ga.plotTimeline(Polymorph.TOTAL_ENERGY)
+    #ga.doGenerationStep()
+    ga.doMultipleGenerationSteps(10, verbose=True)
+    ga.plotTimeline()
     ga.analyzeTimeline(yscale='linear')
     #bp = ga.factory.base_polymorph
+    
+    ga.analyzeGeneticDiversity()
     
     deleteTempfiles(testing_dir)
     
