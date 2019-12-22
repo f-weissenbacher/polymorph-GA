@@ -61,14 +61,14 @@ class Polymorph:
     # Constructor and other __functions__ ---------------------------------------------------------------------------- #
     def __init__(self, zmatrix, bond_mutator, angle_mutator, dihedral_mutator,
                  mutable_bonds=None, mutable_angles=None, mutable_dihedrals=None,
-                 crossover_rate=1e-3, bond_map=None, name="", generation_number=-1, custom_id=None):
+                 crossover_rate=1e-3, bond_map=None, name="", custom_id=None):
 
         self.name = name
         if custom_id is None:
             self.id = Polymorph._generate_id()
         else:
             self.id = custom_id
-        self.generation_number = generation_number
+
         self.bond_mutator = bond_mutator
         self.angle_mutator = angle_mutator
         self.dihedral_mutator = dihedral_mutator
@@ -113,23 +113,7 @@ class Polymorph:
         return {'bondlengths' : self.zmat.loc[self._mutable_bonds,'bond'],
                 'angles' : self.zmat.loc[self._mutable_angles, 'angle'],
                 'dihedrals' : self.zmat.loc[self._mutable_dihedrals,'dihedral']}
-
-    @property
-    def bond_atoms(self):
-        return self.zmat.iloc[1:].loc[:,'b']
-    
-    @property
-    def angle_atoms(self):
-        angles_df = self.zmat.iloc[2:].loc[:,['b','a']].sort_index()
-        angles_df = angles_df.rename(columns={'b':'B', 'a':'C'}).rename_axis("A", axis="columns")
-        return angles_df
-    
-    @property
-    def dihedral_atoms(self):
-        dihedrals_df = self.zmat.iloc[3:].loc[:,['b','a','d']].sort_index()
-        dihedrals_df = dihedrals_df.rename(columns={'b':'B', 'a':'C', 'd':'D'}).rename_axis("A", axis="columns")
-        return dihedrals_df
-    
+   
     @property
     def structure(self):
         return self.zmat.get_cartesian().sort_index()
@@ -167,6 +151,34 @@ class Polymorph:
     @property
     def zmat_string(self):
         return self.zmat.to_zmat(upper_triangle=False)
+    
+    # Getters -------------------------------------------------------------------------------------------------------- #
+    def bond_atoms(self, mutable_only=False):
+        if mutable_only:
+            return self.zmat.loc[self._mutable_bonds, 'b']
+        else:
+            return self.zmat.iloc[1:].loc[:, 'b']
+
+    def angle_atoms(self, mutable_only=False):
+        if mutable_only:
+            angles_df = self.zmat.loc[self._mutable_angles]
+        else:
+            angles_df = self.zmat.iloc[2:]
+        # Sort values
+        angles_df = angles_df.loc[:, ['b', 'a']].sort_index()
+        angles_df = angles_df.rename(columns={'b': 'B', 'a': 'C'}).rename_axis("A", axis="columns")
+        return angles_df
+
+    @property
+    def dihedral_atoms(self, mutable_only=False):
+        if mutable_only:
+            dihedrals_df = self.zmat.loc[self._mutable_dihedrals]
+        else:
+            dihedrals_df = self.zmat.iloc[3:]
+        # Sort values and rename columns
+        dihedrals_df = dihedrals_df.loc[:, ['b', 'a', 'd']].sort_index()
+        dihedrals_df = dihedrals_df.rename(columns={'b': 'B', 'a': 'C', 'd': 'D'}).rename_axis("A", axis="columns")
+        return dihedrals_df
 
     # Private / internal functions ----------------------------------------------------------------------------------- #
 
@@ -181,7 +193,7 @@ class Polymorph:
             bond_map[i].add(j)
             bond_map[j].add(i)
 
-        bond_atoms = self.bond_atoms
+        bond_atoms = self.bond_atoms(mutable_only=False)
         for a,b in zip(bond_atoms.index, bond_atoms):
             bond_map[a].add(b)
             bond_map[b].add(a)
@@ -200,7 +212,26 @@ class Polymorph:
         
 
     # Mating and Crossover ------------------------------------------------------------------------------------------- #
-    def mateWith(self, partner, verbose=False):
+    
+    def calculateGenomeDifference(self, partner, comparison_mode='average'):
+        own_genome = self.genome
+        partner_genome = partner.genome
+        
+        bond_mismatch = np.abs((own_genome['bondlengths'] - partner_genome['bondlengths']) / \
+                               (own_genome['bondlengths'] + partner_genome['bondlengths']))
+        angles_mismatch = np.abs(own_genome['angles'] - partner_genome['angles'])
+        dihedrals_mismatch = np.abs(own_genome['dihedrals'] - partner_genome['dihedrals'])
+        L360 = dihedrals_mismatch > 180
+        dihedrals_mismatch[L360] = 360 - dihedrals_mismatch[L360]
+        
+        if comparison_mode == 'average':
+            return np.mean(bond_mismatch), np.mean(angles_mismatch), np.mean(dihedrals_mismatch)
+        elif comparison_mode == 'maximum':
+            return np.max(bond_mismatch), np.max(angles_mismatch), np.max(dihedrals_mismatch)
+        else:
+            return ValueError("Invalid comparison mode. Valid options: 'average', 'maximum'")
+    
+    def mateWith(self, partner, validate_child=True, verbose=False):
         """ Creates an offspring polymorph by mating two polymorphs
         Both involved polymorphs are assumed to share the same type of genome """
 
@@ -222,11 +253,16 @@ class Polymorph:
                 new_zmat.safe_loc[dihedral_index, 'dihedral'] = partner.zmat.loc[dihedral_index, 'dihedral']
       
         name = f"Child of {self.id} & {partner.id}"
-        generation_number = max(self.generation_number, partner.generation_number) + 1
+      
+        if validate_child:
+            if not checkAtomDistances(new_zmat):
+                if verbose:
+                    print("Resulting child was not valid!")
+                return None
       
         new_polymorph = Polymorph(new_zmat, self.bond_mutator, self.angle_mutator, self.dihedral_mutator,
                                   self._mutable_bonds, self._mutable_angles, self._mutable_dihedrals,
-                                  self.crossover_probability, name=name, generation_number=generation_number)
+                                  self.crossover_probability, name=name)
         
         if verbose:
             print(f"--> Child polymorph: {new_polymorph.id}")
@@ -361,10 +397,7 @@ class Polymorph:
         self.mutateBonds(verbose=verbose)
         self.mutateAngles(verbose=verbose)
         self.mutateDihedrals(verbose=verbose)
-
-
-    # Geometry Optimization ------------------------------------------------------------------------------------------ #
-    
+   
 
     # SCF Calculations ----------------------------------------------------------------------------------------------- #
     def setupGeometryForCalculation(self, basis=None, charge=None, spin=None, verbosity=None):
@@ -376,7 +409,6 @@ class Polymorph:
             charge = self.charge
         if spin is None:
             spin = self.spin
-            
            
         mol = pyscf.gto.Mole()
         mol.atom = self.real_structure.to_string(index=False, header=False)
@@ -423,8 +455,6 @@ class Polymorph:
             self.needs_evaluation = False
         else:
             print(f"Polymorph {self.id}: Hartree-Fock calculation did not converge!")
-        
-
         
     def calculateElectronAffinity(self, anion_spin=None, run_dir=None):
         if anion_spin is None:
@@ -498,8 +528,17 @@ class Polymorph:
             self.properties[Polymorph.IONIZATION_ENERGY] = np.nan
             return None
 
-    # Visualization -------------------------------------------------------------------------------------------------
+    def evaluate(self, fitness_property=TOTAL_ENERGY):
+        """ Determines the fitness of the polymorph by running the corresponding SCF calculations """
+
+        if fitness_property == Polymorph.IONIZATION_ENERGY:
+            self.calculateIonizationEnergy()
+        elif fitness_property == Polymorph.ELECTRON_AFFINITY:
+            self.calculateElectronAffinity()
+        else:
+            self.runHartreeFock()
     
+    # Visualization -------------------------------------------------------------------------------------------------
     def visualize(self):
         atoms = self.structure.get_ase_atoms()
         ase.visualize.view(atoms, name=f"ID_{self.id}_")

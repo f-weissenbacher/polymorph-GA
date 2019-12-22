@@ -74,6 +74,9 @@ class PolymorphFactory:
             
         Polymorph.resetIdCounter()
         self._createBasePolymorph()
+        
+        print("Running DFT calculation for base polymorph")
+        self.base_polymorph.evaluate()
     
     @property
     def mutable_bonds(self):
@@ -163,13 +166,13 @@ class PolymorphFactory:
     
     def setupDefaultMutators(self):
         self.bond_mutator = PlaceboMutator('bond')
-        self.angle_mutator = IncrementalMutator('angle', [0, 180], [-30, 30],
+        self.angle_mutator = IncrementalMutator('angle', [0, 180], [-60, 60],
                                                 gene_is_periodic=False, mutation_rate=self.mutation_rate)
-        self.dihedral_mutator = IncrementalMutator('dihedral', [-180, 180], [-30, 30],
+        self.dihedral_mutator = IncrementalMutator('dihedral', [-180, 180], [-60, 60],
                                                    gene_is_periodic=True, mutation_rate=self.mutation_rate)
     
     # Generation of polymorphs -----------------------------------------------------
-    def generateRandomPolymorph(self, valid_structure_only=True, n_max_restarts=2):
+    def generateRandomPolymorph(self, valid_structure_only=True, n_max_restarts=10):
         """ Generates a random polymorph by running full range mutations on the base polymorph """
         
         for k in range(n_max_restarts):
@@ -219,4 +222,4 @@ class PolymorphFactory:
         self.base_polymorph = Polymorph(self.zmat_base,
                                         PlaceboMutator('bond'), PlaceboMutator('angle'), PlaceboMutator('dihedral'),
                                         mutable_bonds=[], mutable_angles=[], mutable_dihedrals=[],
-                                        crossover_rate=0.0, name="base structure", generation_number=-1)
+                                        crossover_rate=0.0, name="base polymorph")
