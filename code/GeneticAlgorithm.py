@@ -14,6 +14,8 @@ import pybel
 import shutil
 import os
 import pickle
+import copy
+
 
 from matplotlib.ticker import MaxNLocator
 import matplotlib.pyplot as plt
@@ -41,25 +43,55 @@ def renderPolymorphs(polymorphs, shader='basic'):
     display(HTML('<div class="row">{}</div>'.format("".join(columns))))
 
 
-def assignMatingPairs(n_pairs, mating_pool):
+def assignMatingPairs(n_pairs, mating_pool, family_relations=None):
     """ Randomly assigns polymorphs from the mating pool into mating pairs.
     :param int n_pairs: Number of mating pairs to form
-    :param mating_pool: List or Iterable of IDs of possible mating partners
+    :param mating_pool: List or Iterable of IDs of all possible mating partners
+    :param family_relations: List of families. If specified, each entry signifies a family. Each family is a list of
+    polymorphs (i.e. their IDs) that are too closely related, i.e. their genome is too similar to mate. Mating pairs where
+    both partners belong to the same family are therefore prohibited
     :return pair_indices: Pairs of polymorph IDs in form of numpy array of shape (n_pairs, 2)
     """
     
+    pair_indices = None
     mating_pool_size = len(mating_pool)
     
-    pair_indices = None
-    for k in range(int(np.ceil(2 * n_pairs / mating_pool_size))):
-        if k == 0:
-            pair_indices = np.random.permutation(mating_pool)
-        else:
-            pair_indices = np.append(pair_indices, np.random.permutation(mating_pool))
+    if family_relations is None:
+        for k in range(int(np.ceil(2 * n_pairs / mating_pool_size))):
+            if k == 0:
+                pair_indices = np.random.permutation(mating_pool)
+            else:
+                pair_indices = np.append(pair_indices, np.random.permutation(mating_pool))
     
-    pair_indices = pair_indices[:2 * n_pairs]
-    pair_indices = np.reshape(pair_indices, (n_pairs, 2))
+        pair_indices = pair_indices[:2 * n_pairs]
+        pair_indices = np.reshape(pair_indices, (n_pairs, 2))
     
+    else:
+        pair_indices = list()
+        while len(pair_indices) < n_pairs:
+            families = copy.deepcopy(family_relations)
+            while len(families) > 0:
+                n_families = len(families)
+                family_indices = list(np.arange(n_families))
+                f1_idx = family_indices.pop(np.random.randint(n_families)) # Index of first family
+                f2_idx = family_indices[np.random.randint(n_families-1)] # Index of second family
+                # Select mating partners from different families
+                pm1_id = np.random.choice(families[f1_idx],1)[0]
+                pm2_id = np.random.choice(families[f2_idx],1)[0]
+                # Add pair to list
+                pair_indices.append([pm1_id, pm2_id])
+                # Check if list of pairs is complete
+                if len(pair_indices) == n_pairs:
+                    break
+                # Remove the chosen polymorphs from their respective families
+                families[f1_idx].remove(pm1_id)
+                families[f2_idx].remove(pm2_id)
+                # Rebuild families list, throw out all families that are now empty
+                families = [f for f in families if f != []]
+         
+        # Cast to numpy array for consistency
+        pair_indices = np.array(pair_indices)
+        
     return pair_indices
 
 
@@ -684,12 +716,15 @@ if __name__ is "__main__":
     #ga.fillCurrentGeneration()
     
     #ga.doGenerationStep()
-    ga.doMultipleGenerationSteps(10, verbose=True)
+    ga.doMultipleGenerationSteps(2, verbose=True)
     ga.plotTimeline()
     ga.analyzeTimeline(yscale='linear')
     #bp = ga.factory.base_polymorph
     
-    ga.analyzeGeneticDiversity()
+    family_relations = ga.analyzeGeneticDiversity()
     
-    deleteTempfiles(testing_dir)
+    mating_pool = list(ga.current_generation.keys())
+    assignMatingPairs(4, mating_pool, family_relations)
+    
+    #deleteTempfiles(testing_dir)
     
