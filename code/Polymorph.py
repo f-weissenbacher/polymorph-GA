@@ -26,6 +26,8 @@ from ase import visualize, neighborlist
 import imolecule
 #from ase.visualize import view
 
+import pybel
+
 from Utilities import checkAtomDistances
 from Mutators import Mutator
 
@@ -143,7 +145,7 @@ class Polymorph:
     @property
     def gzmat_string(self):
         gzmat_text = "# gzmat created from Polymorph\n"
-        gzmat_text += "\n" + f"Name: {self.name}, ID:{self.id}, Gen:{self.generation_number}\n" + "\n"
+        gzmat_text += "\n" + f"Name: {self.name}, ID:{self.id}\n" + "\n"
         gzmat_text += f"{self.charge:d} {(2*self.spin+1):d}\n"
         gzmat_text += self.zmat_string
         return gzmat_text
@@ -539,9 +541,14 @@ class Polymorph:
             self.runHartreeFock()
     
     # Visualization -------------------------------------------------------------------------------------------------
-    def visualize(self):
-        atoms = self.structure.get_ase_atoms()
-        ase.visualize.view(atoms, name=f"ID_{self.id}_")
+    def visualize(self, viewer='ase'):
+        if viewer == 'ase':
+            atoms = self.structure.get_ase_atoms()
+            ase.visualize.view(atoms, name=f"ID_{self.id}_")
+        else:
+            pybel.Ipython_3d = True
+            ob_mol = pybel.readstring('gzmat', self.gzmat_string)
+            return ob_mol
     
     # Misc ----------------------------------------------------------------------------------------------------------
     def selectDihedralsByType(self, type='proper'):

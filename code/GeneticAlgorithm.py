@@ -131,8 +131,10 @@ class GeneticAlgorithm:
         self.work_dir = work_dir
         self.pyscf_calc_dir = os.path.join(work_dir, "pyscf-calculations")
         makeSureDirectoryExists(self.pyscf_calc_dir)
-        
+
+        print("Spawning initial generation ...")
         self.fillCurrentGeneration()
+        print("Setup of genetic algorithm complete.")
         
     @property
     def current_generation_number(self):
@@ -656,7 +658,7 @@ class GeneticAlgorithm:
         plt.colorbar(image, ax=ax)
         ax.set_title(f"Evolution of {property_key}")
         ax.set_xlabel("Number of generations")
-        ax.set_ylabel("Polymorphs ranked by fitness")
+        ax.set_ylabel(f"Polymorphs ranked by {property_key}")
         ax.xaxis.set_major_locator(MaxNLocator(integer=True))
         
     def analyzeTimeline(self, property_key=None, ax=None, yscale='linear'):
